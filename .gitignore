@@ -1,0 +1,8 @@
+state/*.db
+state/*.db-wal
+state/*.db-shm
+app/build/
+app/.dart_tool/
+app/.flutter-plugins*
+__pycache__/
+*.pyc
