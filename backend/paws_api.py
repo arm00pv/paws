@@ -102,6 +102,12 @@ def _db() -> sqlite3.Connection:
         pet_id INTEGER NOT NULL, weight REAL NOT NULL,
         date TEXT, created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE NOT NULL, name TEXT DEFAULT '',
+        token_hash TEXT UNIQUE NOT NULL,
+        created_at TEXT
+    );
     """)
     return conn
 
@@ -534,6 +540,104 @@ def refer(pid: int, body: dict = None):
     code = referral_points(db, pid, "friend")
     _points(db, pid, 150, "referral")
     return {"code": code, "points": 150}
+
+
+class BarcodeIn(BaseModel):
+    brand: str = ""
+    product: str = ""
+    category: str = "food"
+
+
+@app.get("/api/v1/barcode/{upc}")
+def barcode_lookup(upc: str):
+    """Phase 6 - resolve a UPC: panel memory -> Open Food Facts -> unknown."""
+    from phase6 import lookup
+    db = _db()
+    return lookup(db, upc)
+
+
+@app.post("/api/v1/barcode/{upc}/teach")
+def barcode_teach(upc: str, body: BarcodeIn):
+    """Phase 6 - the user teaches an unknown barcode; the panel learns."""
+    from phase6 import teach
+    db = _db()
+    return teach(db, upc, body.brand, body.product, body.category)
+
+
+@app.post("/api/v1/receipts/barcode")
+def add_barcode_receipt(body: dict = None):
+    """Phase 6 - scan a barcode -> a one-line purchase + points.
+    body: {pet_id, upc, brand, product, category, amount}"""
+    body = body or {}
+    from phase6 import lookup
+    db = _db()
+    upc = str(body.get("upc", "")).strip()
+    if not upc:
+        raise HTTPException(400, "no barcode")
+    info = lookup(db, upc)
+    brand = body.get("brand") or (info.get("brand") if info.get("ok") else "")
+    product = body.get("product") or (info.get("product") if info.get("ok") else "")
+    if not product:
+        raise HTTPException(400, "unknown barcode - teach it first")
+    amount = float(body.get("amount") or 0)
+    db.execute("INSERT INTO receipts (pet_id,store,amount) VALUES (?,?,?)",
+               (body.get("pet_id", 1), "Barcode", str(amount)))
+    rid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
+    pts = int(amount) or 10
+    db.execute("INSERT INTO purchases (receipt_id,brand,product,category,"
+               "amount,points_earned) VALUES (?,?,?,?,?,?)",
+               (rid, brand, product, body.get("category", "food"),
+                amount, pts))
+    db.commit()
+    _points(db, body.get("pet_id", 1), pts, f"barcode_{rid}")
+    return {"ok": True, "brand": brand, "product": product,
+            "points": pts, "receipt_id": rid, "source": info.get("source")}
+
+
+class SignupIn(BaseModel):
+    email: str
+    name: str = ""
+
+
+@app.post("/api/v1/signup")
+def signup(body: SignupIn):
+    """Phase 6 - multi-user: a real account (the panel's growth path)."""
+    import hashlib as _h
+    email = body.email.strip().lower()
+    if "@" not in email:
+        raise HTTPException(400, "valid email required")
+    db = _db()
+    if db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
+        raise HTTPException(400, "email already registered")
+    token = _h.sha256(f"{email}:{int(time.time()*1000)}".encode()).hexdigest()[:32]
+    cur = db.execute("INSERT INTO users (email,name,token_hash) VALUES (?,?,?)",
+                     (email, body.name or email.split("@")[0], token))
+    db.commit()
+    return {"user_id": cur.lastrowid, "token": token,
+            "message": "welcome to PAWS"}
+
+
+class LoginIn(BaseModel):
+    email: str
+    token: str
+
+
+@app.post("/api/v1/login")
+def login(body: LoginIn):
+    db = _db()
+    u = db.execute("SELECT * FROM users WHERE email=?",
+                   (body.email.strip().lower(),)).fetchone()
+    if not u or u["token_hash"] != body.token:
+        raise HTTPException(401, "invalid credentials")
+    return {"ok": True, "user_id": u["id"], "email": u["email"],
+            "name": u["name"]}
+
+
+@app.get("/api/v1/users")
+def users():
+    db = _db()
+    rows = db.execute("SELECT id,email,name,created_at FROM users").fetchall()
+    return {"users": [dict(r) for r in rows]}
 
 
 @app.get("/api/v1/health")
