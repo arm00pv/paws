@@ -21,12 +21,36 @@ class PawsApp extends StatelessWidget {
       title: 'PAWS',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFE07A3F), brightness: Brightness.dark),
+            seedColor: const Color(0xFFFFB45E), brightness: Brightness.dark),
         useMaterial3: true,
       ),
       home: const HomePage(),
     );
   }
+}
+
+String _petAge(String dob) {
+  if (dob == null || dob.trim().isEmpty) return 'age unknown';
+  try {
+    final d = DateTime.parse(dob);
+    final now = DateTime.now();
+    var yrs = now.year - d.year;
+    if (now.month < d.month || (now.month == d.month && now.day < d.day)) yrs--;
+    if (yrs < 0) yrs = 0;
+    if (yrs == 0) {
+      final mos = (now.month - d.month) + (now.year - d.year) * 12;
+      return mos <= 0 ? 'puppy' : '$mos mo';
+    }
+    return '$yrs yr${yrs == 1 ? '' : 's'}';
+  } catch (_) {
+    return 'age unknown';
+  }
+}
+
+String _fmtAge(String dob) => _petAge(dob);
+
+String _b64(String s) {
+  return s;
 }
 
 class HomePage extends StatefulWidget {
@@ -73,14 +97,55 @@ class _HomePageState extends State<HomePage> {
                   : ListView(
                       padding: const EdgeInsets.all(12),
                       children: [
+                        // ── THE DASHBOARD (UX review fix: fill the void) ──
+                        Card(
+                          color: const Color(0x3322B573),
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text('Your pack',
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Text('${_pets.length} fur baby${_pets.length == 1 ? '' : 'ies'} — scan a receipt, earn points, claim real pet coupons.',
+                                  style: Theme.of(context).textTheme.bodySmall),
+                              const SizedBox(height: 10),
+                              Row(children: [
+                                Expanded(child: FilledButton.icon(
+                                    onPressed: () => _showAddPet(),
+                                    icon: const Icon(Icons.pets), label: const Text('Add a pet'))),
+                                const SizedBox(width: 8),
+                                Expanded(child: FilledButton.tonalIcon(
+                                    onPressed: _showQuickAdd,
+                                    icon: const Icon(Icons.camera_alt),
+                                    label: const Text('Scan & earn'))),
+                              ]),
+                            ]),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
                         for (final p in _pets)
                           Card(
+                            clipBehavior: Clip.antiAlias,
                             child: ListTile(
-                              leading: CircleAvatar(
-                                  child: Text('${p['name']}'[0])),
-                              title: Text('${p['name']}'),
-                              subtitle: Text(
-                                  '${p['breed']} · ${p['weight']}kg · born ${p['dob']}'),
+                              leading: p['photo'] != null && '${p['photo']}'.isNotEmpty
+                                  ? CircleAvatar(
+                                      radius: 28,
+                                      backgroundImage: MemoryImage(base64Decode('${p['photo']}')),
+                                    )
+                                  : CircleAvatar(
+                                      radius: 28,
+                                      backgroundColor: const Color(0xFFFFB45E),
+                                      child: Text('${p['name']}'[0].toUpperCase(),
+                                          style: const TextStyle(fontSize: 22, color: Colors.black87)),
+                                    ),
+                              title: Text('${p['name']}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                              subtitle: Text([
+                                '${p['breed']}',
+                                _petAge(p['dob']),
+                                if ((p['weight'] ?? 0) > 0) '${p['weight']}kg',
+                              ].where((s) => s.isNotEmpty).join(' · ')),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () => Navigator.push(context,
                                   MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
@@ -88,11 +153,17 @@ class _HomePageState extends State<HomePage> {
                           ),
                       ],
                     ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddPet,
-        icon: const Icon(Icons.pets),
-        label: const Text('Add a pet'),
-      ),
+      floatingActionButton: _pets.isEmpty
+          ? FloatingActionButton.extended(
+              onPressed: _showAddPet,
+              icon: const Icon(Icons.pets),
+              label: const Text('Add a pet'),
+            )
+          : FloatingActionButton(
+              onPressed: _showAddPet,
+              tooltip: 'Add a pet',
+              child: const Icon(Icons.pets),
+            ),
       bottomNavigationBar: BottomAppBar(
         child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
           TextButton.icon(
@@ -136,6 +207,12 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
+  }
+
+  void _showQuickAdd() {
+    if (_pets.isEmpty) return;
+    final p = _pets.first;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => PetPage(petId: p['id'])));
   }
 
   void _showAddPet() {
@@ -275,11 +352,11 @@ class _PetPageState extends State<PetPage> {
         Row(children: [
           Expanded(child: ElevatedButton.icon(
               onPressed: _showVaccinePicker,
-              icon: const Icon(Icons.vaccines), label: const Text('Vaccine +150'))),
+              icon: const Icon(Icons.vaccines), label: const Text('Log vaccine'))),
           const SizedBox(width: 8),
           Expanded(child: ElevatedButton.icon(
               onPressed: () => _addEvent('vet'),
-              icon: const Icon(Icons.medical_services), label: const Text('Vet visit +100'))),
+              icon: const Icon(Icons.medical_services), label: const Text('Log vet visit'))),
         ]),
         const SizedBox(height: 12),
         ElevatedButton.icon(
@@ -293,31 +370,31 @@ class _PetPageState extends State<PetPage> {
           Expanded(child: ElevatedButton.icon(
               onPressed: _scanBarcode,
               icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scan barcode'))),
+              label: const Text('Scan product'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(
               onPressed: _showEmailImport,
               icon: const Icon(Icons.email_outlined),
-              label: const Text('Import email'))),
+              label: const Text('Add from email'))),
         ]),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: OutlinedButton.icon(
               onPressed: _showSpend,
               icon: const Icon(Icons.pie_chart),
-              label: const Text('Spend'))),
+              label: const Text('Brand history'))),
         ]),
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: ElevatedButton.icon(
               onPressed: _logWeight,
               icon: const Icon(Icons.monitor_weight),
-              label: const Text('Log weight +50'))),
+              label: const Text('Log weight'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(
               onPressed: _showDigest,
               icon: const Icon(Icons.insights),
-              label: const Text('Digest'))),
+              label: const Text('Pet report'))),
         ]),
         const SizedBox(height: 16),
         const Text('Your coupons', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -567,7 +644,7 @@ class _PetPageState extends State<PetPage> {
                       SnackBar(content: Text('Not enough points (${resp.body})')));
                 }
               },
-              child: const Text('Mint'),
+              child: const Text('Claim'),
             ),
           ),
       ],

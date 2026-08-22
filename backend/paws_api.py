@@ -650,6 +650,21 @@ def users():
     return {"users": [dict(r) for r in rows]}
 
 
+class PhotoIn(BaseModel):
+    image_b64: str
+
+
+@app.post("/api/v1/pets/{pid}/photo")
+def set_photo(pid: int, body: PhotoIn):
+    """UX review fix: pet photos (the emotional core)."""
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    db.execute("UPDATE pets SET photo=? WHERE id=?", (body.image_b64, pid))
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}
