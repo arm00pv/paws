@@ -64,6 +64,7 @@ def _db() -> sqlite3.Connection:
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT 1,   -- the owner (multi-user)
         name TEXT NOT NULL, breed TEXT, mix TEXT, sex TEXT,
         neutered INTEGER, dob TEXT, weight REAL, activity TEXT,
         allergies TEXT, medications TEXT, vet TEXT, insurance TEXT,
@@ -129,17 +130,18 @@ class PetIn(BaseModel):
     activity: str = ""
     allergies: str = ""
     microchip: str = ""
+    user_id: int = 1
 
 
 @app.post("/api/v1/pets")
 def add_pet(body: PetIn):
     db = _db()
     cur = db.execute(
-        "INSERT INTO pets (name,breed,mix,sex,neutered,dob,weight,activity,"
-        "allergies,microchip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-        (body.name, body.breed, body.mix, body.sex, int(body.neutered),
-         body.dob, body.weight, body.activity, body.allergies,
-         body.microchip, time.strftime("%Y-%m-%d")))
+        "INSERT INTO pets (user_id,name,breed,mix,sex,neutered,dob,weight,"
+        "activity,allergies,microchip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (body.user_id, body.name, body.breed, body.mix, body.sex,
+         int(body.neutered), body.dob, body.weight, body.activity,
+         body.allergies, body.microchip, time.strftime("%Y-%m-%d")))
     db.commit()
     # welcome points — the profile is the emotional core
     _points(db, cur.lastrowid, 100, "profile_complete")
@@ -147,9 +149,13 @@ def add_pet(body: PetIn):
 
 
 @app.get("/api/v1/pets")
-def pets():
+def pets(user_id: int = 0):
     db = _db()
-    rows = db.execute("SELECT * FROM pets").fetchall()
+    if user_id:
+        rows = db.execute("SELECT * FROM pets WHERE user_id=? ORDER BY id",
+                          (user_id,)).fetchall()
+    else:
+        rows = db.execute("SELECT * FROM pets ORDER BY id").fetchall()
     return {"pets": [dict(r) for r in rows]}
 
 
@@ -486,11 +492,15 @@ def weight_curve(pid: int):
 
 
 @app.get("/api/v1/household")
-def household():
+def household(user_id: int = 0):
     """Phase 4 - all pets, one view (the family dashboard)."""
     from phase4 import household_summary
     db = _db()
-    return household_summary(db)
+    s = household_summary(db)
+    if user_id:
+        s["pets"] = [p for p in s["pets"] if p.get("user_id", 0) == user_id]
+        s["pet_count"] = len(s["pets"])
+    return s
 
 
 @app.get("/api/v1/pets/{pid}/digest")

@@ -68,7 +68,8 @@ def household_summary(db):
             "SELECT COUNT(*) AS c FROM health_events e WHERE e.pet_id=? "
             "AND lower(e.kind) IN ('vaccine','test')",
             (p["id"],)).fetchone()["c"]
-        out.append({"id": p["id"], "name": p["name"], "breed": p["breed"],
+        out.append({"id": p["id"], "user_id": p["user_id"],
+                    "name": p["name"], "breed": p["breed"],
                     "weight": p["weight"], "spend": spend, "points": pts,
                     "vaccines_logged": overdue,
                     "dob": p["dob"]})
