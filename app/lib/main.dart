@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'scan_screen.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
@@ -290,10 +291,17 @@ class _PetPageState extends State<PetPage> {
         const SizedBox(height: 12),
         Row(children: [
           Expanded(child: ElevatedButton.icon(
+              onPressed: _scanBarcode,
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan barcode'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
               onPressed: _showEmailImport,
               icon: const Icon(Icons.email_outlined),
               label: const Text('Import email'))),
-          const SizedBox(width: 8),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
           Expanded(child: OutlinedButton.icon(
               onPressed: _showSpend,
               icon: const Icon(Icons.pie_chart),
@@ -396,6 +404,12 @@ class _PetPageState extends State<PetPage> {
       } catch (_) {}
     }
     return 'Saved';
+  }
+
+  void _scanBarcode() {
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => ScanScreen(petId: widget.petId)))
+        .then((_) => _load());
   }
 
   Future<void> _logWeight() async {

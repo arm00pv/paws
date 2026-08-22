@@ -21,7 +21,7 @@
 
 ### 1. The Panel — aggregated market intelligence (`/api/v1/panel`)
 - Brand share by spend and units (already built)
-- **Breed × food matrix** (already built) — the targeting gold: "German Shepherds buy Royal Canin at 79% share"
+- **Breed × food matrix** (demo built) — the targeting gold at panel scale: "breed X buys brand Y at Z% share". DEMO NOTE: current numbers are a 2-pet demo — real shares need a real panel (1,000+ pets in one metro).
 - Category mix: food / treats / toys / vet
 - Panel growth (pets, receipts, spend over time)
 - **Priced like the panels they already buy** (Hill's pays premium for clean room data) — anchor at the panel rate, not per-record
@@ -48,7 +48,7 @@
 1. **Pet health data is NOT HIPAA-regulated** — we hold the full medical + purchase profile, legally
 2. **First-party, purchase-verified** — unlike surveys or panels, every row is a real transaction
 3. **The panel self-feeds** — users do the work (scan/photo/email) to earn points; our cost per record is near zero
-4. **The UPC knowledge base compounds** — nobody else has 1000 taught pet UPCs
+4. **The UPC knowledge base compounds (a projection, not yet a claim)** — every taught scan is proprietary UPC→brand data; the catalog starts empty and grows with use
 5. **No giant in the seat** — Fetch/IBotta treat pets as a line on a grocery receipt; Chewy has accounts, not a rewards data play
 
 ---
@@ -58,7 +58,7 @@
 | Gap | Why it matters | Effort |
 |---|---|---|
 | **Real users** | Brand contracts are sized by panel coverage (100s → 1000s of pets) | Public launch + growth loop (referral built) |
-| **The Coupon Bureau / GS1 registration** | Real retail redemption needs the 8112 Universal Coupon standard + bureau account | Business relationship, ~weeks |
+| **The Coupon Bureau / GS1 registration** | Real retail redemption needs GS1 registration + the brand's Company Prefix (AI 8110 DataBar; AI 8112 Universal Coupons via The Coupon Bureau for serialized digital) | Business relationship, ~weeks-months |
 | **A brand's GS1 Company Prefix** | Coupons must carry the brand's own prefix | The deal itself |
 | **A signed pilot** | First check > everything; even $5k pilot proves the model | Pitch + relationship |
 | **Watchtower deploy** | Public surface for real signups | Network pending |
@@ -74,4 +74,13 @@
 
 ---
 
-*Built with the institution's stack: panel intelligence from real receipts/emails/barcodes, GS1 DataBar coupons, self-hosted infra. The product is real; the relationship is the next build.*
+*Built with the institution's stack: receipt/email/mapping capture, GS1 DataBar coupons, self-hosted infra. The machine is real; the pitch is honest about what needs scale (panel N, a pilot brand, GS1 clearance).*
+
+---
+
+## Auditor's corrections applied (independent review, 2026-08)
+
+1. **8110 vs 8112 corrected** - our coupons use AI 8110 (GS1 DataBar Expanded); AI 8112 Universal Coupons (The Coupon Bureau) are the separate serialized digital standard. Fixed.
+2. **"79% share" and "1000 UPCs" are demo/projection** - not present assets. Deleted the implication they are live.
+3. **First dollar path reframed**: a paid promotion pilot with a small/local DTC pet brand in one metro ($500-2,500 flat, in-app points + voucher, NO GS1 involvement) - not the data sale. The data conversation is a year-two conversation at 4-digit panel N.
+4. **Deploy hygiene**: the SCP-with-password script is a dev artifact; a real launch needs a domain + TLS + privacy policy/ToS + consent plumbing before any brand legal review.

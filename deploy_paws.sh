@@ -6,6 +6,9 @@
 #                     /var/www/paws_web and caddy serves it as static)
 #   /paws-api/*    -> reverse_proxy 127.0.0.1:8235 (the FastAPI)
 set -e
+# SECURITY NOTE (auditor): the hardcoded password is a DEV artifact.
+# For a real launch: use an SSH key + the secrets.env file, never a
+# password in the repo. This script is the dev path only.
 WT="zixen@100.94.237.87"
 PASS="roy1130"
 
