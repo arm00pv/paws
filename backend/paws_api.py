@@ -154,8 +154,11 @@ def pet_detail(pid: int):
     pts = db.execute(
         "SELECT COALESCE(SUM(amount),0) AS t FROM points_ledger WHERE pet_id=?",
         (pid,)).fetchone()["t"]
+    # THE VACCINE CALENDAR - the sticky feature: auto-calculated next-due
+    from vaccine_schedule import summarize
+    cal = summarize([dict(r) for r in events])
     return {"pet": dict(p), "health": [dict(r) for r in events],
-            "points": pts}
+            "points": pts, "vaccine_calendar": cal}
 
 
 # ── HEALTH EVENTS ───────────────────────────────────────────────────────

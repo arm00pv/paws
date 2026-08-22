@@ -166,8 +166,15 @@ class _PetPageState extends State<PetPage> {
   @override
   Widget build(BuildContext context) {
     if (_data == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    final pet = _data!['pet'];
-    final health = _data!['health'] as List;
+    final Map<String, dynamic> d = _data!;
+    final pet = d['pet'];
+    final health = d['health'] as List;
+    final Map<String, dynamic> vcal =
+        (d['vaccine_calendar'] is Map)
+            ? Map<String, dynamic>.from(d['vaccine_calendar'] as Map)
+            : <String, dynamic>{};
+    final int overdue = vcal['overdue_count'] ?? 0;
+    final List<dynamic> cal = (vcal['calendar'] as List?) ?? const [];
     return Scaffold(
       appBar: AppBar(title: Text('${pet['name']}')),
       body: ListView(padding: const EdgeInsets.all(12), children: [
@@ -184,6 +191,37 @@ class _PetPageState extends State<PetPage> {
           ])),
         ),
         const SizedBox(height: 8),
+        // ── THE VACCINE CALENDAR (the sticky feature) ────────────────
+        const Text('Vaccine calendar',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        if (overdue > 0)
+          Card(
+            color: Colors.red.shade900,
+            child: ListTile(
+              leading: const Icon(Icons.warning_amber, color: Colors.redAccent),
+              title: Text('$overdue vaccine(s) OVERDUE — book the vet',
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ...cal.map((c) => Card(
+                  margin: const EdgeInsets.symmetric(vertical: 3),
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(c['overdue'] ? Icons.error : Icons.check_circle,
+                        color: c['overdue'] ? Colors.redAccent : Colors.green),
+                    title: Text('${c['vaccine']}'),
+                    subtitle: Text(c['overdue']
+                        ? 'OVERDUE — was due ${c['next']}'
+                        : 'next due ${c['next']} (in ${c['days_left']}d)'),
+                    trailing: c['overdue']
+                        ? IconButton(
+                            icon: const Icon(Icons.check),
+                            onPressed: () => _addEvent('vaccine'),
+                            tooltip: 'Log this vaccine')
+                        : null,
+                  ),
+                )),
+        const SizedBox(height: 8),
         Text('Health & records', style: Theme.of(context).textTheme.titleMedium),
         ...health.map((h) => ListTile(
               leading: Icon(h['kind'] == 'vaccine' ? Icons.vaccines : Icons.medical_services),
@@ -193,7 +231,7 @@ class _PetPageState extends State<PetPage> {
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: ElevatedButton.icon(
-              onPressed: () => _addEvent('vaccine'),
+              onPressed: _showVaccinePicker,
               icon: const Icon(Icons.vaccines), label: const Text('Vaccine +150'))),
           const SizedBox(width: 8),
           Expanded(child: ElevatedButton.icon(
@@ -294,10 +332,30 @@ class _PetPageState extends State<PetPage> {
     return 'Saved';
   }
 
-  Future<void> _addEvent(String kind) async {
+  void _showVaccinePicker() {
+    const vaccines = ['DHPP', 'Rabies', 'Bordetella', 'Leptospirosis',
+        'Lyme', 'Heartworm', 'FleaTick'];
+    showModalBottomSheet(context: context, builder: (ctx) => ListView(
+      children: [
+        const ListTile(title: Text('Which vaccine?',
+            style: TextStyle(fontWeight: FontWeight.bold))),
+        for (final v in vaccines)
+          ListTile(
+            leading: const Icon(Icons.vaccines),
+            title: Text(v),
+            onTap: () {
+              Navigator.pop(ctx);
+              _addEvent('vaccine', v);
+            },
+          ),
+      ],
+    ));
+  }
+
+  Future<void> _addEvent(String kind, [String? name]) async {
     await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/events'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'kind': kind, 'name': kind == 'vaccine' ? 'Vaccine' : 'Vet visit', 'date': ''}));
+        body: jsonEncode({'kind': kind, 'name': name ?? (kind == 'vaccine' ? 'Vaccine' : 'Vet visit'), 'date': ''}));
     _load();
   }
 
