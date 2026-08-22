@@ -389,68 +389,64 @@ def parse_ocr(body: ParseIn):
     return {"store": store, "items": items}
 
 
-class ParseIn(BaseModel):
-    ocr_text: str
+class EmailIn(BaseModel):
+    pet_id: int
+    email_text: str
 
 
-@app.post("/api/v1/parse-ocr")
-def parse_ocr(body: ParseIn):
-    """Turn raw OCR output into structured line items (JSON-first + a
-    mechanical fallback). The app shows these for confirmation."""
-    import re as _re
-    text = body.ocr_text
-    items = []
-    store = ""
-    m = _re.search(r"\{[\s\S]*\}", text)
-    if m:
-        try:
-            d = json.loads(m.group(0))
-            store = d.get("store", "")
-            for it in d.get("items", [])[:20]:
-                items.append({"brand": str(it.get("brand", "")),
-                              "product": str(it.get("product", "")),
-                              "price": float(it.get("amount", 0) or 0)})
-        except Exception:
-            items = []
+@app.post("/api/v1/receipts/email")
+def import_email(body: EmailIn):
+    """Phase 3: pasted Chewy/Amazon order confirmation -> purchases."""
+    from phase3 import parse_email_text
+    parsed = parse_email_text(body.email_text)
+    items = parsed["items"]
     if not items:
-        for line in text.splitlines():
-            mm = _re.match(r"([A-Za-z][^|]*?)\s*\|\s*([\d.]+)", line)
-            if mm:
-                items.append({"brand": "", "product": mm.group(1).strip(),
-                              "price": float(mm.group(2))})
-    return {"store": store, "items": items}
+        return {"ok": False, "reason": "no line items found in the email",
+                "items": []}
+    db = _db()
+    total = round(sum(i["price"] for i in items), 2)
+    cur = db.execute("INSERT INTO receipts (pet_id,store,amount,raw_ocr) "
+                     "VALUES (?,?,?,?)",
+                     (body.pet_id, parsed["store"], str(total),
+                      body.email_text[:2000]))
+    rid = cur.lastrowid
+    pts = 0
+    for i in items:
+        p = int(i["price"]) or 5
+        pts += p
+        db.execute("INSERT INTO purchases (receipt_id,brand,product,category,"
+                   "amount,points_earned) VALUES (?,?,?,?,?,?)",
+                   (rid, i["brand"], i["product"], "food", i["price"], p))
+    db.commit()
+    _points(db, body.pet_id, pts, f"email_receipt_{rid}")
+    return {"store": parsed["store"], "items": items, "total": total,
+            "points": pts, "receipt_id": rid}
 
 
-class ParseIn(BaseModel):
-    ocr_text: str
-
-
-@app.post("/api/v1/parse-ocr")
-def parse_ocr(body: ParseIn):
-    """Turn raw OCR output into structured line items (JSON-first + a
-    mechanical fallback). The app shows these for confirmation."""
-    import re as _re
-    text = body.ocr_text
-    items = []
-    store = ""
-    m = _re.search(r"\{[\s\S]*\}", text)
-    if m:
-        try:
-            d = json.loads(m.group(0))
-            store = d.get("store", "")
-            for it in d.get("items", [])[:20]:
-                items.append({"brand": str(it.get("brand", "")),
-                              "product": str(it.get("product", "")),
-                              "price": float(it.get("amount", 0) or 0)})
-        except Exception:
-            items = []
-    if not items:
-        for line in text.splitlines():
-            mm = _re.match(r"([A-Za-z][^|]*?)\s*\|\s*([\d.]+)", line)
-            if mm:
-                items.append({"brand": "", "product": mm.group(1).strip(),
-                              "price": float(mm.group(2))})
-    return {"store": store, "items": items}
+@app.get("/api/v1/pets/{pid}/spend")
+def brand_spend(pid: int):
+    """Phase 3 - the BRAND-SPEND VIEW: the data panel's output."""
+    from phase3 import BRAND_SPEND_SQL
+    db = _db()
+    pet = db.execute("SELECT * FROM pets WHERE id=?", (pid,)).fetchone()
+    if not pet:
+        raise HTTPException(404, "pet not found")
+    rows = db.execute(BRAND_SPEND_SQL, (pid,)).fetchall()
+    all_spend = db.execute("""
+        SELECT ROUND(SUM(p.amount),2) AS t FROM purchases p
+        JOIN receipts r ON p.receipt_id = r.id WHERE r.pet_id=?""",
+        (pid,)).fetchone()["t"] or 0
+    from phase3 import normalize_brand
+    merged = {}
+    for r in rows:
+        canon = normalize_brand(r["brand"])
+        if canon not in merged:
+            merged[canon] = {"brand": canon, "items": 0, "total": 0.0}
+        merged[canon]["items"] += r["items"]
+        merged[canon]["total"] = round(merged[canon]["total"] + r["total"], 2)
+    brands = sorted(merged.values(), key=lambda b: b["total"], reverse=True)
+    return {"pet": pet["name"], "breed": pet["breed"],
+            "total_spend": all_spend, "brands": brands}
 
 
 @app.get("/api/v1/health")

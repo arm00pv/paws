@@ -245,6 +245,18 @@ class _PetPageState extends State<PetPage> {
           label: const Text('Scan a receipt (photo → OCR → points)'),
           style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade800),
         ),
+        const SizedBox(height: 12),
+        Row(children: [
+          Expanded(child: ElevatedButton.icon(
+              onPressed: _showEmailImport,
+              icon: const Icon(Icons.email_outlined),
+              label: const Text('Import order email'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showSpend,
+              icon: const Icon(Icons.pie_chart),
+              label: const Text('Spend by brand'))),
+        ]),
         const SizedBox(height: 16),
         const Text('Your coupons', style: TextStyle(fontWeight: FontWeight.bold)),
         ..._coupons.map((c) => ListTile(
@@ -330,6 +342,62 @@ class _PetPageState extends State<PetPage> {
       } catch (_) {}
     }
     return 'Saved';
+  }
+
+  void _showEmailImport() {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Import a Chewy/Amazon order email'),
+      content: SizedBox(width: 340, child: TextField(
+        controller: ctrl,
+        maxLines: 8,
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(),
+          hintText: 'Paste the order confirmation email text here…'),
+      )),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () async {
+          final r = await http.post(
+              Uri.parse('$API/api/v1/receipts/email'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'pet_id': widget.petId, 'email_text': ctrl.text}));
+          if (ctx.mounted) Navigator.pop(ctx);
+          final d = jsonDecode(r.body);
+          if (r.statusCode == 200 && d['ok'] != false) {
+            _load();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('Imported ${d['items'].length} items, +${d['points']} pts')));
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${d['reason'] ?? 'Import failed'}')));
+            }
+          }
+        }, child: const Text('Import')),
+      ],
+    ));
+  }
+
+  Future<void> _showSpend() async {
+    final r = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/spend'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text(d['pet'].toString() + "'s spend"),
+      content: SizedBox(width: 320, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Text('Total: \$${d['total_spend']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        for (final b in (d['brands'] as List).take(8))
+          ListTile(dense: true,
+            title: Text('${b['brand']}'),
+            subtitle: Text('${b['items']} items'),
+            trailing: Text('\$${b['total']}')),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
   }
 
   void _showVaccinePicker() {
