@@ -92,7 +92,49 @@ class _HomePageState extends State<HomePage> {
         icon: const Icon(Icons.pets),
         label: const Text('Add a pet'),
       ),
+      bottomNavigationBar: BottomAppBar(
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+          TextButton.icon(
+              onPressed: _showPanel, icon: const Icon(Icons.bar_chart),
+              label: const Text('The Panel')),
+          TextButton.icon(
+              onPressed: _showRefer, icon: const Icon(Icons.group_add),
+              label: const Text('Refer +150')),
+        ]),
+      ),
     );
+  }
+
+  Future<void> _showPanel() async {
+    final r = await http.get(Uri.parse('$API/api/v1/panel'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('THE PANEL — pet market intelligence'),
+      content: SizedBox(width: 340, child: SingleChildScrollView(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text('Panel: ${d['panel']['pets']} pets · \$${d['panel']['spend']} spend'),
+        const SizedBox(height: 8),
+        const Text('Brand share:', style: TextStyle(fontWeight: FontWeight.bold)),
+        for (final b in (d['brand_share'] as List).take(6))
+          Text('  ${b['brand']}: ${b['share']}%'),
+        const SizedBox(height: 8),
+        const Text('Breed × food:', style: TextStyle(fontWeight: FontWeight.bold)),
+        for (final m in (d['breed_food_matrix'] as List).take(4))
+          Text('  ${m['breed']} ← ${m['brand']}'),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  Future<void> _showRefer() async {
+    if (_pets.isEmpty) return;
+    final pid = _pets.first['id'];
+    final r = await http.post(Uri.parse('$API/api/v1/pets/$pid/refer'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
   }
 
   void _showAddPet() {

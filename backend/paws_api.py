@@ -513,6 +513,29 @@ def redeem_coupon(code: str):
     return {"ok": True, "code": code}
 
 
+@app.get("/api/v1/panel")
+def panel():
+    """Phase 5 - THE PANEL: the aggregated, anonymized data product.
+    Brand share, breed x food matrix, category spend, panel growth.
+    This is the asset we'd sell to pet brands (no individual pet data)."""
+    from phase5 import panel_summary
+    db = _db()
+    return panel_summary(db)
+
+
+@app.post("/api/v1/pets/{pid}/refer")
+def refer(pid: int, body: dict = None):
+    """Phase 5 - the referral loop: a pet parent refers a friend,
+    the referrer earns 150 pts (cheapest acquisition)."""
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    from phase5 import referral_points
+    code = referral_points(db, pid, "friend")
+    _points(db, pid, 150, "referral")
+    return {"code": code, "points": 150}
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}
