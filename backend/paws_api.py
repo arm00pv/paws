@@ -97,6 +97,11 @@ def _db() -> sqlite3.Connection:
         title TEXT, brand TEXT, points_cost INTEGER, redeemed INTEGER DEFAULT 0,
         created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS weights (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL, weight REAL NOT NULL,
+        date TEXT, created_at TEXT
+    );
     """)
     return conn
 
@@ -447,6 +452,65 @@ def brand_spend(pid: int):
     brands = sorted(merged.values(), key=lambda b: b["total"], reverse=True)
     return {"pet": pet["name"], "breed": pet["breed"],
             "total_spend": all_spend, "brands": brands}
+
+
+class WeightIn(BaseModel):
+    weight: float
+    date: str = ""
+
+
+@app.post("/api/v1/pets/{pid}/weight")
+def add_weight(pid: int, body: WeightIn):
+    """Phase 4 - log a weight (the vet-loved health metric)."""
+    from phase4 import log_weight
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    log_weight(db, pid, body.weight, body.date)
+    _points(db, pid, 50, f"weight_{pid}")
+    return {"ok": True, "points": 50}
+
+
+@app.get("/api/v1/pets/{pid}/weight")
+def weight_curve(pid: int):
+    """Phase 4 - the weight history with deltas."""
+    from phase4 import weight_curve as _wc
+    db = _db()
+    return {"pet_id": pid, "curve": _wc(db, pid)}
+
+
+@app.get("/api/v1/household")
+def household():
+    """Phase 4 - all pets, one view (the family dashboard)."""
+    from phase4 import household_summary
+    db = _db()
+    return household_summary(db)
+
+
+@app.get("/api/v1/pets/{pid}/digest")
+def pet_digest(pid: int):
+    """Phase 4 - the pet digest: spend, top brand, coupons, weight."""
+    from phase4 import digest
+    db = _db()
+    d = digest(db, pid)
+    if not d.get("ok"):
+        raise HTTPException(404, "pet not found")
+    return d
+
+
+@app.post("/api/v1/coupons/{code}/redeem")
+def redeem_coupon(code: str):
+    """Phase 4 - mark a minted coupon redeemed (single-use closure)."""
+    db = _db()
+    cur = db.execute("UPDATE coupons SET redeemed=1 WHERE code=? AND redeemed=0",
+                     (code,))
+    db.commit()
+    if cur.rowcount == 0:
+        c = db.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+        if not c:
+            raise HTTPException(404, "coupon not found")
+        raise HTTPException(400, "coupon already redeemed")
+    return {"ok": True, "code": code}
 
 
 @app.get("/api/v1/health")

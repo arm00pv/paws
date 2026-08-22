@@ -250,12 +250,24 @@ class _PetPageState extends State<PetPage> {
           Expanded(child: ElevatedButton.icon(
               onPressed: _showEmailImport,
               icon: const Icon(Icons.email_outlined),
-              label: const Text('Import order email'))),
+              label: const Text('Import email'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(
               onPressed: _showSpend,
               icon: const Icon(Icons.pie_chart),
-              label: const Text('Spend by brand'))),
+              label: const Text('Spend'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: ElevatedButton.icon(
+              onPressed: _logWeight,
+              icon: const Icon(Icons.monitor_weight),
+              label: const Text('Log weight +50'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showDigest,
+              icon: const Icon(Icons.insights),
+              label: const Text('Digest'))),
         ]),
         const SizedBox(height: 16),
         const Text('Your coupons', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -342,6 +354,50 @@ class _PetPageState extends State<PetPage> {
       } catch (_) {}
     }
     return 'Saved';
+  }
+
+  Future<void> _logWeight() async {
+    final ctrl = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Log weight (kg)'),
+      content: TextField(
+        controller: ctrl,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: const InputDecoration(
+          border: OutlineInputBorder(), hintText: 'e.g. 35.9'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () async {
+          final w = double.tryParse(ctrl.text);
+          if (w == null) return;
+          await http.post(
+              Uri.parse('$API/api/v1/pets/${widget.petId}/weight'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'weight': w}));
+          if (ctx.mounted) Navigator.pop(ctx);
+          _load();
+        }, child: const Text('Log +50 pts')),
+      ],
+    ));
+  }
+
+  Future<void> _showDigest() async {
+    final r = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/digest'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text(d['pet'].toString() + "'s digest"),
+      content: SizedBox(width: 320, child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Spend: \$${d['spend_total']} (${d['spend_items']} items)'),
+        Text('Top brand: ${d['top_brand']}'),
+        Text('Points: ${d['points']}'),
+        Text('Coupons: ${d['coupons']} (${d['coupons_redeemed']} redeemed)'),
+        if (d['last_weight'] != null)
+          Text('Weight: ${d['last_weight']}kg (${d['last_weight_date']})'),
+      ])),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
   }
 
   void _showEmailImport() {
