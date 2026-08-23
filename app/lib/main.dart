@@ -170,6 +170,7 @@ class _HomePageState extends State<HomePage> {
                               subtitle: Text([
                                 '${p['breed']}',
                                 _petAge(p['dob']),
+                                if ('${p['dob']}'.trim().isEmpty) '+ add birthday',
                                 if ((p['weight'] ?? 0) > 0) '${p['weight']}kg',
                                 if (_birthdayCountdown('${p['dob']}').isNotEmpty)
                                   _birthdayCountdown('${p['dob']}'),
@@ -251,7 +252,7 @@ class _HomePageState extends State<HomePage> {
                                       const SizedBox(width: 6),
                                       Expanded(child: Text('${r['pet']} @ ${r['store']}',
                                           overflow: TextOverflow.ellipsis)),
-                                      Text('+\$${(double.tryParse('${r['amount']}') ?? 0).toInt()} pts',
+                                      Text('+${(double.tryParse('${r['amount']}') ?? 0).toInt()} pts',
                                           style: const TextStyle(fontWeight: FontWeight.w600,
                                               color: Colors.greenAccent)),
                                     ]),
