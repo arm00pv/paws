@@ -50,6 +50,22 @@ String _petAge(String dob) {
 
 String _fmtAge(String dob) => _petAge(dob);
 
+String _birthdayCountdown(String dob) {
+  if (dob == null || dob.trim().isEmpty) return '';
+  try {
+    final d = DateTime.parse(dob);
+    final now = DateTime.now();
+    var next = DateTime(now.year, d.month, d.day);
+    if (next.isBefore(DateTime(now.year, now.month, now.day))) {
+      next = DateTime(now.year + 1, d.month, d.day);
+    }
+    final days = next.difference(DateTime(now.year, now.month, now.day)).inDays;
+    return days == 0 ? '🎂 birthday today!' : '🎂 in $days days';
+  } catch (_) {
+    return '';
+  }
+}
+
 String _b64(String s) {
   return s;
 }
@@ -155,6 +171,8 @@ class _HomePageState extends State<HomePage> {
                                 '${p['breed']}',
                                 _petAge(p['dob']),
                                 if ((p['weight'] ?? 0) > 0) '${p['weight']}kg',
+                                if (_birthdayCountdown('${p['dob']}').isNotEmpty)
+                                  _birthdayCountdown('${p['dob']}'),
                               ].where((s) => s.isNotEmpty).join(' · ')),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () => Navigator.push(context,
@@ -370,6 +388,7 @@ class PetPage extends StatefulWidget {
 class _PetPageState extends State<PetPage> {
   Map<String, dynamic>? _data;
   int _points = 0;
+  int _streak = 0;
   List<dynamic> _coupons = [];
 
   @override
@@ -383,10 +402,12 @@ class _PetPageState extends State<PetPage> {
     final d = jsonDecode(r.body);
     final p = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/points'));
     final c = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/coupons'));
+    final s = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/streak'));
     setState(() {
       _data = d;
       _points = jsonDecode(p.body)['balance'];
       _coupons = jsonDecode(c.body)['coupons'];
+      _streak = jsonDecode(s.body)['streak'];
     });
   }
 
@@ -423,6 +444,19 @@ class _PetPageState extends State<PetPage> {
             ElevatedButton(
                 onPressed: _showCatalog, child: const Text('Redeem')),
           ])),
+        ),
+        // ── THE CARE STREAK (daily engagement hook) ──
+        Card(
+          color: const Color(0x3322B573),
+          child: ListTile(
+            leading: const Icon(Icons.local_fire_department, color: Color(0xFFFFB45E)),
+            title: Text('$_streak-day care streak',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text('Walk, play, brush - tap daily to keep it alive (+25 pts)'),
+            trailing: FilledButton(
+                onPressed: _checkIn,
+                child: const Text("Done today")),
+          ),
         ),
         const SizedBox(height: 8),
         // ── THE VACCINE CALENDAR (the sticky feature) ────────────────
@@ -595,6 +629,15 @@ class _PetPageState extends State<PetPage> {
       } catch (_) {}
     }
     return 'Saved';
+  }
+
+  Future<void> _checkIn() async {
+    await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/checkin'));
+    _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Care streak +1! (+25 pts)')));
+    }
   }
 
   Future<void> _uploadPhoto() async {

@@ -109,6 +109,12 @@ def _db() -> sqlite3.Connection:
         token_hash TEXT UNIQUE NOT NULL,
         created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS care_checks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL,
+        check_date TEXT,
+        action TEXT DEFAULT 'care'
+    );
     """)
     return conn
 
@@ -737,6 +743,53 @@ def home_dashboard(user_id: int = 0):
             "pets": [{"id": p["id"], "name": p["name"],
                       "species": p["species"], "dob": p["dob"],
                       "photo": (p["photo"] or "")[:40]} for p in pets]}
+
+
+@app.post("/api/v1/pets/{pid}/checkin")
+def pet_checkin(pid: int):
+    """Round 11 - the daily care check-in: the streak hook.
+    A pet parent taps 'done today' (walk/brushed/played) - the streak
+    builds, driving daily returns (and daily data)."""
+    import datetime as _dt
+    today = str(_dt.date.today())
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    # prevent double-counting a single day
+    if db.execute("SELECT 1 FROM care_checks WHERE pet_id=? AND check_date=?",
+                  (pid, today)).fetchone():
+        return {"ok": True, "streak": _streak(db, pid), "already": True}
+    db.execute("INSERT INTO care_checks (pet_id,check_date) VALUES (?,?)",
+               (pid, today))
+    db.commit()
+    _points(db, pid, 25, "daily_care")
+    return {"ok": True, "streak": _streak(db, pid), "points": 25}
+
+
+def _streak(db, pid: int) -> int:
+    """Consecutive-day streak (counts today if checked)."""
+    import datetime as _dt
+    days = sorted(r["check_date"] for r in db.execute(
+        "SELECT check_date FROM care_checks WHERE pet_id=?",
+        (pid,)).fetchall())
+    if not days:
+        return 0
+    today = _dt.date.today()
+    streak = 0
+    cur = today
+    ds = set(days)
+    if str(today) not in ds:
+        cur = today - _dt.timedelta(days=1)  # streak continues from yesterday
+    while str(cur) in ds:
+        streak += 1
+        cur -= _dt.timedelta(days=1)
+    return streak
+
+
+@app.get("/api/v1/pets/{pid}/streak")
+def pet_streak(pid: int):
+    db = _db()
+    return {"streak": _streak(db, pid)}
 
 
 @app.get("/api/v1/health")
