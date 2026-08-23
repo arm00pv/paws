@@ -63,6 +63,7 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   List<dynamic> _pets = [];
   Map<String, dynamic> _activity = {};
+  Map<String, dynamic> _home = {};
   bool _loading = true;
   String? _error;
 
@@ -76,9 +77,11 @@ class _HomePageState extends State<HomePage> {
     try {
       final r = await http.get(Uri.parse('$API/api/v1/pets'));
       final a = await http.get(Uri.parse('$API/api/v1/activity'));
+      final h = await http.get(Uri.parse('$API/api/v1/home'));
       setState(() {
         _pets = jsonDecode(r.body)['pets'];
         _activity = jsonDecode(a.body);
+        _home = jsonDecode(h.body);
         _loading = false;
         _error = null;
       });
@@ -128,31 +131,7 @@ class _HomePageState extends State<HomePage> {
                             ]),
                           ),
                         ),
-                        const SizedBox(height: 10),
-                        if ((_activity['receipts'] ?? []).isNotEmpty)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('Recent activity',
-                                    style: Theme.of(context).textTheme.labelMedium
-                                        ?.copyWith(fontWeight: FontWeight.bold)),
-                                for (final r in (_activity['receipts'] as List).take(3))
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 3),
-                                    child: Row(children: [
-                                      const Icon(Icons.receipt_long, size: 16),
-                                      const SizedBox(width: 6),
-                                      Expanded(child: Text('${r['pet']} @ ${r['store']}',
-                                          overflow: TextOverflow.ellipsis)),
-                                      Text('\$${(double.tryParse('${r['amount']}') ?? 0).toStringAsFixed(2)}',
-                                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                                    ]),
-                                  ),
-                              ]),
-                            ),
-                          ),
-                        const SizedBox(height: 10),
+                        // ── THE PETS (the emotional anchor — first!) ──
                         for (final p in _pets)
                           Card(
                             clipBehavior: Clip.antiAlias,
@@ -182,6 +161,87 @@ class _HomePageState extends State<HomePage> {
                                   MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
                             ),
                           ),
+                        const SizedBox(height: 10),
+                        // ── ACTION REQUIRED (care reminders) ──
+                        if ((_home['actions'] ?? []).isNotEmpty)
+                          Card(
+                            color: const Color(0x33E53935),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('Care reminders',
+                                    style: TextStyle(fontWeight: FontWeight.bold)),
+                                for (final act in (_home['actions'] as List).take(3))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(children: [
+                                      Icon(act['type'] == 'vaccine_overdue'
+                                          ? Icons.warning_amber
+                                          : act['type'] == 'coupon_ready'
+                                              ? Icons.confirmation_number
+                                              : Icons.pets,
+                                          size: 16,
+                                          color: act['type'] == 'vaccine_overdue'
+                                              ? Colors.redAccent : null),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text(
+                                          '${act['pet']}: ${act['vaccine'] ?? act['about'] ?? ''}',
+                                          overflow: TextOverflow.ellipsis)),
+                                    ]),
+                                  ),
+                              ]),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        // ── REWARDS SHOWCASE (what 1612 pts can buy) ──
+                        if ((_home['showcase'] ?? []).isNotEmpty)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('Rewards for your pack',
+                                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                                for (final s in (_home['showcase'] as List).take(4))
+                                  ListTile(
+                                    dense: true,
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: const Icon(Icons.confirmation_number),
+                                    title: Text('${s['title']}'),
+                                    trailing: Text('${s['points']} pts',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            color: s['affordable'] == true
+                                                ? Colors.greenAccent : Colors.grey)),
+                                  ),
+                              ]),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        if ((_activity['receipts'] ?? []).isNotEmpty)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('Recent activity',
+                                    style: Theme.of(context).textTheme.labelMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold)),
+                                for (final r in _activityRows())
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(children: [
+                                      const Icon(Icons.receipt_long, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text('${r['pet']} @ ${r['store']}',
+                                          overflow: TextOverflow.ellipsis)),
+                                      Text('+\$${(double.tryParse('${r['amount']}') ?? 0).toInt()} pts',
+                                          style: const TextStyle(fontWeight: FontWeight.w600,
+                                              color: Colors.greenAccent)),
+                                    ]),
+                                  ),
+                              ]),
+                            ),
+                          ),
+
                       ],
                     ),
       floatingActionButton: _pets.isEmpty
@@ -195,16 +255,6 @@ class _HomePageState extends State<HomePage> {
               tooltip: 'Add a pet',
               child: const Icon(Icons.pets),
             ),
-      bottomNavigationBar: BottomAppBar(
-        child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          TextButton.icon(
-              onPressed: _showPanel, icon: const Icon(Icons.bar_chart),
-              label: const Text('The Panel')),
-          TextButton.icon(
-              onPressed: _showRefer, icon: const Icon(Icons.group_add),
-              label: const Text('Refer +150')),
-        ]),
-      ),
     );
   }
 
@@ -240,6 +290,14 @@ class _HomePageState extends State<HomePage> {
         content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
   }
 
+  List<dynamic> _activityRows() {
+    final seen = <String>{};
+    final rows = (_activity['receipts'] as List? ?? [])
+        .where((r) => seen.add('${r['pet']}-${r['store']}-${r['amount']}'))
+        .toList();
+    return rows.take(3).toList();
+  }
+
   void _showQuickAdd() {
     if (_pets.isEmpty) return;
     final p = _pets.first;
@@ -249,18 +307,36 @@ class _HomePageState extends State<HomePage> {
   void _showAddPet() {
     final name = TextEditingController();
     final breed = TextEditingController();
+    final dob = TextEditingController();
+    String species = 'dog';
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('Add your pet'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
         TextField(controller: name, decoration: const InputDecoration(labelText: 'Name')),
         TextField(controller: breed, decoration: const InputDecoration(labelText: 'Breed')),
-      ]),
+        const SizedBox(height: 8),
+        SegmentedButton<String>(
+          segments: const [
+            ButtonSegment(value: 'dog', icon: Icon(Icons.pets), label: Text('Dog')),
+            ButtonSegment(value: 'cat', icon: Icon(Icons.pets), label: Text('Cat')),
+          ],
+          selected: {species},
+          onSelectionChanged: (s) => species = s.first,
+        ),
+        const SizedBox(height: 8),
+        TextField(controller: dob,
+            decoration: const InputDecoration(
+                labelText: 'Birthday (YYYY-MM-DD)',
+                hintText: '2021-04-12',
+                helperText: "Tells us your pet's age - so reminders make sense")),
+      ])),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
           await http.post(Uri.parse('$API/api/v1/pets'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'name': name.text, 'breed': breed.text}));
+            body: jsonEncode({'name': name.text, 'breed': breed.text,
+                              'species': species.toLowerCase(), 'dob': dob.text}));
           if (ctx.mounted) Navigator.pop(ctx);
           _load();
         }, child: const Text('Save (+100 pts)')),

@@ -691,6 +691,54 @@ def activity(user_id: int = 0, limit: int = 8):
             "events": [dict(r) for r in ev]}
 
 
+@app.get("/api/v1/home")
+def home_dashboard(user_id: int = 0):
+    """Round 10 - the home needs content: action-required (overdue
+    vaccines / expiring coupons) + the rewards showcase (catalog with
+    affordability) + birthdays. Kills the void with USEFUL content."""
+    db = _db()
+    pets = db.execute("SELECT * FROM pets WHERE (?=0 OR user_id=?) ORDER BY id",
+                      (user_id, user_id)).fetchall()
+    # action-required: overdue vaccines per pet
+    from vaccine_schedule import summarize
+    actions = []
+    for p in pets:
+        ev = db.execute("SELECT name,date FROM health_events WHERE pet_id=?",
+                        (p["id"],)).fetchall()
+        cal = summarize([dict(r) for r in ev])
+        for c in cal.get("calendar", []):
+            if c["overdue"]:
+                actions.append({"type": "vaccine_overdue", "pet": p["name"],
+                                "pet_id": p["id"], "vaccine": c["vaccine"]})
+        if not ev:
+            actions.append({"type": "first_vaccine", "pet": p["name"],
+                            "pet_id": p["id"],
+                            "about": "Start the health record - log the first vaccine"})
+    # expiring coupons
+    coupons = db.execute("""
+        SELECT c.title, c.pet_id, p.name AS pet, c.created_at
+        FROM coupons c JOIN pets p ON c.pet_id = p.id
+        WHERE (?=0 OR p.user_id=?) AND c.redeemed=0
+        ORDER BY c.id DESC LIMIT 3""", (user_id, user_id)).fetchall()
+    for c in coupons:
+        actions.append({"type": "coupon_ready", "pet": c["pet"],
+                        "pet_id": c["pet_id"], "about": c["title"]})
+    # rewards showcase: the coupon catalog with affordability + pet points
+    showcase = []
+    for c in _catalog():
+        pts = db.execute("""
+            SELECT COALESCE(SUM(l.amount),0) AS t
+            FROM points_ledger l JOIN pets p ON l.pet_id = p.id
+            WHERE (?=0 OR p.user_id=?)""", (user_id, user_id)).fetchone()["t"]
+        showcase.append({"id": c["id"], "title": c["title"],
+                         "brand": c["brand"], "points": c["points"],
+                         "affordable": pts >= c["points"]})
+    return {"actions": actions, "showcase": showcase,
+            "pets": [{"id": p["id"], "name": p["name"],
+                      "species": p["species"], "dob": p["dob"],
+                      "photo": (p["photo"] or "")[:40]} for p in pets]}
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}
