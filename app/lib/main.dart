@@ -82,6 +82,7 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic> _home = {};
   bool _loading = true;
   String? _error;
+  int _tab = 0;
 
   @override
   void initState() {
@@ -111,7 +112,125 @@ class _HomePageState extends State<HomePage> {
     return Scaffold(
       appBar: AppBar(title: const Text('PAWS — rewards for good boys & girls'),
           actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)]),
-      body: _loading
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+          NavigationDestination(icon: Icon(Icons.pets_outlined), selectedIcon: Icon(Icons.pets), label: 'Pets'),
+          NavigationDestination(icon: Icon(Icons.redeem_outlined), selectedIcon: Icon(Icons.redeem), label: 'Rewards'),
+          NavigationDestination(icon: Icon(Icons.insights_outlined), selectedIcon: Icon(Icons.insights), label: 'Activity'),
+        ],
+      ),
+      body: _tab == 1
+          ? _petsView()
+          : _tab == 2
+              ? _rewardsView()
+              : _tab == 3
+                  ? _activityView()
+                  : _homeBody(),
+    );
+  }
+
+  // ── TAB 1: PETS (the pack) ──────────────────────────────────────────
+  Widget _petsView() {
+    return _loading
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.all(12),
+            children: [
+              Text('Your pack',
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              for (final p in _pets)
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    leading: p['photo'] != null && '${p['photo']}'.isNotEmpty
+                        ? CircleAvatar(radius: 28, backgroundImage: MemoryImage(base64Decode('${p['photo']}')))
+                        : CircleAvatar(radius: 28, backgroundColor: const Color(0xFFFFB45E),
+                            child: Text((p['species'] == 'cat') ? '🐱' : '🐶', style: const TextStyle(fontSize: 24))),
+                    title: Text('${p['name']}',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    subtitle: Text([
+                      '${p['breed']}',
+                      _petAge(p['dob']),
+                      if ((p['weight'] ?? 0) > 0) '${p['weight']}kg',
+                    ].where((s) => s.isNotEmpty).join(' · ')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context,
+                        MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
+                  ),
+                ),
+            ],
+          );
+  }
+
+  // ── TAB 2: REWARDS (the showcase, focused) ──
+  Widget _rewardsView() {
+    final show = (_home['showcase'] as List? ?? []);
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Text('Rewards',
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text('${_activity['points'] ?? 0} paw points — claim real pet coupons',
+            style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 8),
+        for (final s in show)
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.confirmation_number),
+              title: Text('${s['title']}'),
+              subtitle: Text('${s['brand']}'),
+              trailing: Text('${s['points']} pts',
+                  style: TextStyle(fontWeight: FontWeight.w600,
+                      color: s['affordable'] == true ? Colors.greenAccent : Colors.grey)),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Card(
+          color: const Color(0x3322B573),
+          child: ListTile(
+            leading: const Icon(Icons.group_add),
+            title: const Text('Refer a friend'),
+            subtitle: const Text('+150 pts when they join'),
+            trailing: FilledButton(onPressed: _showRefer, child: const Text('Invite')),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── TAB 3: ACTIVITY (the feed, focused) ──
+  Widget _activityView() {
+    return ListView(
+      padding: const EdgeInsets.all(12),
+      children: [
+        Text('Recent activity',
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        for (final r in _activityRows())
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.receipt_long),
+              title: Text('${r['pet']} @ ${r['store']}'),
+              subtitle: Text('scan #${r['id']}'),
+              trailing: Text('+${(double.tryParse('${r['amount']}') ?? 0).toInt()} pts',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.greenAccent)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  // keep the original home body under a renamed method
+  Widget _homeBody() {
+    return _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? Center(child: Text(_error!, textAlign: TextAlign.center))
@@ -262,19 +381,7 @@ class _HomePageState extends State<HomePage> {
                           ),
 
                       ],
-                    ),
-      floatingActionButton: _pets.isEmpty
-          ? FloatingActionButton.extended(
-              onPressed: _showAddPet,
-              icon: const Icon(Icons.pets),
-              label: const Text('Add a pet'),
-            )
-          : FloatingActionButton(
-              onPressed: _showAddPet,
-              tooltip: 'Add a pet',
-              child: const Icon(Icons.pets),
-            ),
-    );
+                    );
   }
 
   Future<void> _showPanel() async {
@@ -483,10 +590,9 @@ class _PetPageState extends State<PetPage> {
                         ? 'OVERDUE — was due ${c['next']}'
                         : 'next due ${c['next']} (in ${c['days_left']}d)'),
                     trailing: c['overdue']
-                        ? IconButton(
-                            icon: const Icon(Icons.check),
-                            onPressed: () => _addEvent('vaccine'),
-                            tooltip: 'Log this vaccine')
+                        ? FilledButton.tonal(
+                            onPressed: () => _addEvent('vaccine', c['protocol']),
+                            child: const Text('Log shot'))
                         : null,
                   ),
                 )),
