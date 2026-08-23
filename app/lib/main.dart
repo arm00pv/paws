@@ -39,7 +39,8 @@ String _petAge(String dob) {
     if (yrs < 0) yrs = 0;
     if (yrs == 0) {
       final mos = (now.month - d.month) + (now.year - d.year) * 12;
-      return mos <= 0 ? 'puppy' : '$mos mo';
+      if (mos <= 0) return 'baby';
+      return '$mos mo';
     }
     return '$yrs yr${yrs == 1 ? '' : 's'}';
   } catch (_) {
@@ -61,6 +62,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   List<dynamic> _pets = [];
+  Map<String, dynamic> _activity = {};
   bool _loading = true;
   String? _error;
 
@@ -73,8 +75,10 @@ class _HomePageState extends State<HomePage> {
   Future<void> _load() async {
     try {
       final r = await http.get(Uri.parse('$API/api/v1/pets'));
+      final a = await http.get(Uri.parse('$API/api/v1/activity'));
       setState(() {
         _pets = jsonDecode(r.body)['pets'];
+        _activity = jsonDecode(a.body);
         _loading = false;
         _error = null;
       });
@@ -107,8 +111,9 @@ class _HomePageState extends State<HomePage> {
                                   style: Theme.of(context).textTheme.titleMedium
                                       ?.copyWith(fontWeight: FontWeight.bold)),
                               const SizedBox(height: 4),
-                              Text('${_pets.length} fur baby${_pets.length == 1 ? '' : 'ies'} — scan a receipt, earn points, claim real pet coupons.',
-                                  style: Theme.of(context).textTheme.bodySmall),
+                              Text('${_pets.length} fur baby${_pets.length == 1 ? '' : 'ies'} · ${_activity['points'] ?? 0} paw points',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(color: const Color(0xFFFFD9A0), fontWeight: FontWeight.w600)),
                               const SizedBox(height: 10),
                               Row(children: [
                                 Expanded(child: FilledButton.icon(
@@ -124,6 +129,30 @@ class _HomePageState extends State<HomePage> {
                           ),
                         ),
                         const SizedBox(height: 10),
+                        if ((_activity['receipts'] ?? []).isNotEmpty)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('Recent activity',
+                                    style: Theme.of(context).textTheme.labelMedium
+                                        ?.copyWith(fontWeight: FontWeight.bold)),
+                                for (final r in (_activity['receipts'] as List).take(3))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(children: [
+                                      const Icon(Icons.receipt_long, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text('${r['pet']} @ ${r['store']}',
+                                          overflow: TextOverflow.ellipsis)),
+                                      Text('\$${(double.tryParse('${r['amount']}') ?? 0).toStringAsFixed(2)}',
+                                          style: const TextStyle(fontWeight: FontWeight.w600)),
+                                    ]),
+                                  ),
+                              ]),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
                         for (final p in _pets)
                           Card(
                             clipBehavior: Clip.antiAlias,
@@ -136,8 +165,10 @@ class _HomePageState extends State<HomePage> {
                                   : CircleAvatar(
                                       radius: 28,
                                       backgroundColor: const Color(0xFFFFB45E),
-                                      child: Text('${p['name']}'[0].toUpperCase(),
-                                          style: const TextStyle(fontSize: 22, color: Colors.black87)),
+                                      child: Text(
+                                        (p['species'] == 'cat') ? '🐱' : '🐶',
+                                        style: const TextStyle(fontSize: 24),
+                                      ),
                                     ),
                               title: Text('${p['name']}',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
@@ -296,7 +327,14 @@ class _PetPageState extends State<PetPage> {
     final int overdue = vcal['overdue_count'] ?? 0;
     final List<dynamic> cal = (vcal['calendar'] as List?) ?? const [];
     return Scaffold(
-      appBar: AppBar(title: Text('${pet['name']}')),
+      appBar: AppBar(title: Text('${pet['name']}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_a_photo),
+            tooltip: 'Add a photo',
+            onPressed: () => _uploadPhoto(),
+          ),
+        ]),
       body: ListView(padding: const EdgeInsets.all(12), children: [
         Card(
           child: Padding(padding: const EdgeInsets.all(16), child: Row(children: [
@@ -481,6 +519,23 @@ class _PetPageState extends State<PetPage> {
       } catch (_) {}
     }
     return 'Saved';
+  }
+
+  Future<void> _uploadPhoto() async {
+    final picker = ImagePicker();
+    final XFile? img = await picker.pickImage(source: ImageSource.camera);
+    if (img == null) return;
+    final bytes = await img.readAsBytes();
+    final b64 = base64Encode(bytes);
+    await http.post(
+        Uri.parse('$API/api/v1/pets/${widget.petId}/photo'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'image_b64': b64}));
+    _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo saved — what a cutie!')));
+    }
   }
 
   void _scanBarcode() {

@@ -65,8 +65,8 @@ def _db() -> sqlite3.Connection:
     CREATE TABLE IF NOT EXISTS pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER DEFAULT 1,   -- the owner (multi-user)
-        name TEXT NOT NULL, breed TEXT, mix TEXT, sex TEXT,
-        neutered INTEGER, dob TEXT, weight REAL, activity TEXT,
+        name TEXT NOT NULL, breed TEXT, mix TEXT, sex TEXT, species TEXT DEFAULT 'dog',
+        neutered INTEGER, dob TEXT, weight REAL, age TEXT DEFAULT '', activity TEXT,
         allergies TEXT, medications TEXT, vet TEXT, insurance TEXT,
         microchip TEXT, created_at TEXT DEFAULT '', photo TEXT DEFAULT ''
     );
@@ -124,6 +124,7 @@ class PetIn(BaseModel):
     breed: str = ""
     mix: str = ""
     sex: str = ""
+    species: str = "dog"
     neutered: bool = False
     dob: str = ""
     weight: float = 0
@@ -137,11 +138,13 @@ class PetIn(BaseModel):
 def add_pet(body: PetIn):
     db = _db()
     cur = db.execute(
-        "INSERT INTO pets (user_id,name,breed,mix,sex,neutered,dob,weight,"
-        "activity,allergies,microchip,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO pets (user_id,name,breed,mix,sex,species,neutered,dob,"
+        "weight,activity,allergies,microchip,created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.user_id, body.name, body.breed, body.mix, body.sex,
-         int(body.neutered), body.dob, body.weight, body.activity,
-         body.allergies, body.microchip, time.strftime("%Y-%m-%d")))
+         body.species, int(body.neutered), body.dob, body.weight,
+         body.activity, body.allergies, body.microchip,
+         time.strftime("%Y-%m-%d")))
     db.commit()
     # welcome points — the profile is the emotional core
     _points(db, cur.lastrowid, 100, "profile_complete")
@@ -663,6 +666,29 @@ def set_photo(pid: int, body: PhotoIn):
     db.execute("UPDATE pets SET photo=? WHERE id=?", (body.image_b64, pid))
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/v1/activity")
+def activity(user_id: int = 0, limit: int = 8):
+    """Round 9 - the home activity feed: recent receipts + coupons with
+    the pet name, so the home screen shows life, not void."""
+    db = _db()
+    rows = db.execute("""
+        SELECT r.id, r.store, r.amount, r.date, p.name AS pet
+        FROM receipts r JOIN pets p ON r.pet_id = p.id
+        WHERE (? = 0 OR p.user_id = ?)
+        ORDER BY r.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()
+    ev = db.execute("""
+        SELECT h.kind, h.name, h.date, p.name AS pet
+        FROM health_events h JOIN pets p ON h.pet_id = p.id
+        WHERE (? = 0 OR p.user_id = ?)
+        ORDER BY h.id DESC LIMIT 4""", (user_id, user_id)).fetchall()
+    pts = db.execute("""
+        SELECT COALESCE(SUM(l.amount),0) AS t
+        FROM points_ledger l JOIN pets p ON l.pet_id = p.id
+        WHERE (? = 0 OR p.user_id = ?)""", (user_id, user_id)).fetchone()["t"]
+    return {"points": pts, "receipts": [dict(r) for r in rows],
+            "events": [dict(r) for r in ev]}
 
 
 @app.get("/api/v1/health")
