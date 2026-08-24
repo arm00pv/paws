@@ -1028,6 +1028,44 @@ def consumption(user_id: int = 0, days: int = 14):
             "by_breed": [dict(r) for r in rows]}
 
 
+@app.get("/api/v1/recalls")
+def recalls_check(user_id: int = 0):
+    """ROUND 23 - FOOD RECALL ALERTS: check what the user's pets eat
+    against the FDA's public recall feed. Warns BEFORE they feed a
+    recalled bag (trust) + captures switching events (recall data)."""
+    from recalls import recall_feed, match_recalls
+    db = _db()
+    feed = recall_feed()
+    # what does this household feed? from meals + purchases
+    brands = set()
+    products = set()
+    rows = db.execute("""
+        SELECT m.brand, m.product FROM meals m JOIN pets p ON m.pet_id = p.id
+        WHERE (?=0 OR p.user_id=?)
+        UNION SELECT pu.brand, pu.product FROM purchases pu
+        JOIN receipts r ON pu.receipt_id = r.id
+        JOIN pets p ON r.pet_id = p.id WHERE (?=0 OR p.user_id=?)""",
+        (user_id, user_id, user_id, user_id)).fetchall()
+    for r in rows:
+        if r["brand"]:
+            brands.add(r["brand"])
+        if r["product"]:
+            products.add(r["product"])
+    matched = []
+    for b in brands:
+        for h in match_recalls(feed, b, ""):
+            if h not in matched:
+                matched.append(h)
+    for p in products:
+        for h in match_recalls(feed, "", p):
+            if h not in matched:
+                matched.append(h)
+    return {"recall_feed_size": len(feed.get("recalls", [])),
+            "fed_brands": sorted(brands),
+            "matches": matched[:10],
+            "checked_at": feed.get("fetched_at")}
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}

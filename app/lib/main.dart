@@ -92,6 +92,8 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic> _activity = {};
   Map<String, dynamic> _home = {};
   List<dynamic> _careLog = [];
+  String? _recallAlert;
+  int _recallChecked = 0;
   bool _loading = true;
   String? _error;
   int _tab = 0;
@@ -148,6 +150,29 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (_) {
       // notifications are best-effort; the app still works without them
+    }
+  }
+
+  Future<void> _checkRecalls() async {
+    try {
+      final r = await http.get(Uri.parse('$API/api/v1/recalls'));
+      final d = jsonDecode(r.body);
+      setState(() {
+        _recallChecked = d['recall_feed_size'] ?? 0;
+        final matches = (d['matches'] as List? ?? []);
+        _recallAlert = matches.isEmpty
+            ? null
+            : '${matches.first['product']} (${matches.first['firm']}) may be recalled!';
+      });
+      if (mounted && _recallAlert == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No recalls match what you feed — your pack is safe ✅')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Recall check unavailable right now')));
+      }
     }
   }
 
@@ -227,6 +252,7 @@ class _HomePageState extends State<HomePage> {
           _carePetIsCat = _pets.first['species'] == 'cat';
         }
         _scheduleReminders();
+        _checkRecalls();
         _loading = false;
         _error = null;
       });
@@ -615,6 +641,33 @@ class _HomePageState extends State<HomePage> {
                               ]),
                             ),
                           ),
+                        const SizedBox(height: 10),
+                        // ── FOOD RECALL ALERT (reviewer #6 - the trust play) ──
+                        if (_recallAlert != null)
+                          Card(
+                            color: const Color(0x33E53935),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('⚠ Recall alert!',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                                Text(_recallAlert!),
+                                const SizedBox(height: 6),
+                                Text('Stop feeding this product. Contact the manufacturer for a refund/replacement.',
+                                    style: Theme.of(context).textTheme.bodySmall),
+                              ]),
+                            ),
+                          ),
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.shield_outlined, color: Colors.greenAccent),
+                            title: const Text('Food recall check'),
+                            subtitle: Text('FDA-verified · ${_recallChecked} recalls on file'),
+                            trailing: FilledButton.tonal(
+                                onPressed: _checkRecalls,
+                                child: const Text('Check now')),
+                          ),
+                        ),
                         const SizedBox(height: 10),
                         // ── ACTION REQUIRED (care reminders) ──
                         if ((_home['actions'] ?? []).isNotEmpty)
