@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:open_file/open_file.dart';
+import 'package:image/image.dart' as img;
 import 'scan_screen.dart';
 
 const API = String.fromEnvironment(
@@ -755,10 +756,31 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _logFromHome(Map<String, dynamic> act) async {
+    // route through the date dialog (the calendar needs a real date)
     final pid = act['pet_id'];
+    final now = DateTime.now();
+    final today = '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final dateCtrl = TextEditingController(text: today);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Log ${act['vaccine'] ?? 'vaccine'}'),
+        content: TextField(controller: dateCtrl,
+            decoration: const InputDecoration(labelText: 'Date (YYYY-MM-DD)')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log + points')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
     await http.post(Uri.parse('$API/api/v1/pets/$pid/events'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'kind': 'vaccine', 'name': act['vaccine'] ?? 'Vaccine', 'date': ''}));
+        body: jsonEncode({'kind': 'vaccine', 'name': act['vaccine'] ?? 'Vaccine',
+                          'date': dateCtrl.text.trim()}));
     _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -778,7 +800,9 @@ class _HomePageState extends State<HomePage> {
   void _showQuickAdd() {
     if (_pets.isEmpty) return;
     final p = _pets.first;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PetPage(petId: p['id'])));
+    // THE FIX (reviewer #2): "Scan & earn" opens the actual SCANNER
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ScanScreen(petId: p['id'])))
+        .then((_) => _load());
   }
 
   void _showAddPet() {
@@ -1046,6 +1070,13 @@ class _PetPageState extends State<PetPage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'ocr_text': text}));
     final parsed = jsonDecode(parseResp.body);
+    // THE RECEIPT GATE (reviewer #3): surface the rejection honestly
+    if (parsed['rejected'] == true) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Not a receipt: ${parsed['reason'] ?? 'try a clearer photo'}')));
+      return;
+    }
     final items = (parsed['items'] as List).cast<Map<String, dynamic>>();
     if (items.isEmpty) {
       if (!mounted) return;
@@ -1107,10 +1138,18 @@ class _PetPageState extends State<PetPage> {
 
   Future<void> _uploadPhoto() async {
     final picker = ImagePicker();
-    final XFile? img = await picker.pickImage(source: ImageSource.camera);
-    if (img == null) return;
-    final bytes = await img.readAsBytes();
-    final b64 = base64Encode(bytes);
+    final XFile? shot = await picker.pickImage(source: ImageSource.camera);
+    if (shot == null) return;
+    final bytes = await shot.readAsBytes();
+    // ROUND 20 (reviewer #10): downscale to ~512px so a 12MP photo
+    // doesn't become 7MB of base64 in SQLite (was a real production bug)
+    final decoded = img.decodeImage(bytes);
+    final small = decoded != null && (decoded.width > 512 || decoded.height > 512)
+        ? img.copyResize(decoded, width: decoded.width > decoded.height ? 512 : null,
+            height: decoded.height > decoded.width ? 512 : null)
+        : decoded;
+    final outBytes = small != null ? img.encodeJpg(small, quality: 80) : bytes;
+    final b64 = base64Encode(outBytes);
     await http.post(
         Uri.parse('$API/api/v1/pets/${widget.petId}/photo'),
         headers: {'Content-Type': 'application/json'},
@@ -1281,9 +1320,36 @@ class _PetPageState extends State<PetPage> {
   }
 
   Future<void> _addEvent(String kind, [String? name]) async {
+    // THE DATE FIX (reviewer #1): the calendar needs a real date or it
+    // can never compute next-due / overdue. Default to today, let the
+    // user adjust.
+    final now = DateTime.now();
+    final today = '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final dateCtrl = TextEditingController(text: today);
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Log ${name ?? (kind == 'vaccine' ? 'vaccine' : 'vet visit')}'),
+        content: TextField(
+          controller: dateCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Date (YYYY-MM-DD)',
+            helperText: 'The calendar computes next-due from this date'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log + points')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
     await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/events'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'kind': kind, 'name': name ?? (kind == 'vaccine' ? 'Vaccine' : 'Vet visit'), 'date': ''}));
+        body: jsonEncode({'kind': kind, 'name': name ?? (kind == 'vaccine' ? 'Vaccine' : 'Vet visit'),
+                          'date': dateCtrl.text.trim()}));
     _load();
   }
 

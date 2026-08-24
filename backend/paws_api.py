@@ -295,8 +295,15 @@ def mint_coupon(pid: int, catalog_id: str):
     if not cat:
         raise HTTPException(404, "unknown coupon")
     db = _db()
-    bal = db.execute("SELECT COALESCE(SUM(amount),0) FROM points_ledger "
-                      "WHERE pet_id=?", (pid,)).fetchone()[0]
+    # ROUND 20 (reviewer #6): the home shows the HOUSEHOLD balance, so
+    # redemption must use the household balance too (was per-pet — the
+    # home said READY TO CLAIM but the pet couldn't afford it)
+    pet = db.execute("SELECT user_id FROM pets WHERE id=?", (pid,)).fetchone()
+    uid = pet["user_id"] if pet else 1
+    bal = db.execute("""
+        SELECT COALESCE(SUM(l.amount),0) AS t
+        FROM points_ledger l JOIN pets p ON l.pet_id = p.id
+        WHERE p.user_id=?""", (uid,)).fetchone()["t"]
     cost = cat.get("points", 0)
     if bal < cost:
         raise HTTPException(400, f"need {cost} points, have {bal}")
@@ -385,9 +392,18 @@ class ParseIn(BaseModel):
 def parse_ocr(body: ParseIn):
     """Turn raw OCR output into structured line items (with the local 27B
     when available, else a mechanical fallback). The app shows these for
-    confirmation — nothing is auto-posted."""
+    confirmation — nothing is auto-posted.
+    ROUND 20 (reviewer #3): the RECEIPT GATE — a non-receipt is rejected
+    before any points can be earned (the gate existed but was never
+    called — a points-farming hole)."""
     import re as _re
     text = body.ocr_text
+    # THE RECEIPT GATE: only pet-supply receipts pass
+    from phase3 import validate_receipt_text
+    v = validate_receipt_text(text)
+    if not v["ok"]:
+        return {"store": "", "items": [], "rejected": True,
+                "reason": v["reason"]}
     items = []
     store = ""
     # try JSON first (the vision model was asked for strict JSON)

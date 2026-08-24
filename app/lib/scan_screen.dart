@@ -58,7 +58,10 @@ class _ScanScreenState extends State<ScanScreen> {
             decoration: const InputDecoration(labelText: 'Price \$ (optional)')),
       ])),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Skip')),
+        TextButton(onPressed: () {
+          _processing = false;  // THE FIX: don't freeze the scanner on Skip
+          Navigator.pop(ctx);
+        }, child: const Text('Skip')),
         ElevatedButton(
           onPressed: () async {
             Navigator.pop(ctx);
@@ -88,7 +91,10 @@ class _ScanScreenState extends State<ScanScreen> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: const InputDecoration(labelText: 'Price \$ (optional)')),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Skip')),
+        TextButton(onPressed: () {
+          _processing = false;  // THE FIX: don't freeze the scanner on Skip
+          Navigator.pop(ctx);
+        }, child: const Text('Skip')),
         ElevatedButton(onPressed: () async {
           Navigator.pop(ctx);
           await _saveReceipt(upc, brand, product, double.tryParse(amount.text) ?? 0);
