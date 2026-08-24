@@ -57,6 +57,25 @@ def _catalog():
     return _demo_catalog()
 
 
+def _require_user(x_token: str = "") -> int:
+    """ROUND 29 (reviewer #4) - AUTH: the X-Token header maps to a user.
+    The business model's asset was fake with all users = 1; writes now
+    require a real account."""
+    if not x_token:
+        raise HTTPException(401, "authentication required - sign up first")
+    db = _db()
+    u = db.execute("SELECT id FROM users WHERE token_hash=?", (x_token,)).fetchone()
+    if not u:
+        raise HTTPException(401, "invalid token - log in again")
+    return u["id"]
+
+
+def _owns_pet(db, pet_id: int, user_id: int) -> bool:
+    """Does this user own this pet? (multi-tenant integrity)"""
+    p = db.execute("SELECT user_id FROM pets WHERE id=?", (pet_id,)).fetchone()
+    return p is not None and p["user_id"] == user_id
+
+
 def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB, timeout=10)
     conn.row_factory = sqlite3.Row
@@ -173,13 +192,15 @@ class PetIn(BaseModel):
 
 
 @app.post("/api/v1/pets")
-def add_pet(body: PetIn):
+def add_pet(body: PetIn, x_token: str = Header(default="")):
+    # ROUND 29: the pet is bound to the token's user, not body.user_id
+    uid = _require_user(x_token)
     db = _db()
     cur = db.execute(
         "INSERT INTO pets (user_id,name,breed,mix,sex,species,neutered,dob,"
         "weight,activity,allergies,microchip,created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (body.user_id, body.name, body.breed, body.mix, body.sex,
+        (uid, body.name, body.breed, body.mix, body.sex,
          body.species, int(body.neutered), body.dob, body.weight,
          body.activity, body.allergies, body.microchip,
          time.strftime("%Y-%m-%d")))
@@ -230,8 +251,11 @@ class EventIn(BaseModel):
 
 
 @app.post("/api/v1/pets/{pid}/events")
-def add_event(pid: int, body: EventIn):
+def add_event(pid: int, body: EventIn, x_token: str = Header(default="")):
+    uid = _require_user(x_token)
     db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
     db.execute("INSERT INTO health_events (pet_id,kind,name,date,notes) "
                "VALUES (?,?,?,?,?)",
                (pid, body.kind, body.name, body.date, body.notes))
@@ -259,8 +283,11 @@ class ReceiptIn(BaseModel):
 
 
 @app.post("/api/v1/receipts")
-def add_receipt(body: ReceiptIn):
+def add_receipt(body: ReceiptIn, x_token: str = Header(default="")):
+    uid = _require_user(x_token)
     db = _db()
+    if not _owns_pet(db, body.pet_id, uid):
+        raise HTTPException(403, "you don't own this pet")
     cur = db.execute("INSERT INTO receipts (pet_id,store,amount,raw_ocr) "
                      "VALUES (?,?,?,?)",
                      (body.pet_id, body.store, body.amount, body.raw_ocr))
@@ -725,7 +752,7 @@ class PhotoIn(BaseModel):
 
 
 @app.post("/api/v1/pets/{pid}/photo")
-def set_photo(pid: int, body: PhotoIn):
+def set_photo(pid: int, body: PhotoIn, x_token: str = Header(default="")):
     """UX review fix: pet photos (the emotional core)."""
     db = _db()
     if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
@@ -845,7 +872,7 @@ def home_dashboard(user_id: int = 0):
 
 
 @app.post("/api/v1/pets/{pid}/checkin")
-def pet_checkin(pid: int, body: dict = None):
+def pet_checkin(pid: int, body: dict = None, x_token: str = Header(default="")):
     """Round 11 - the daily care check-in: the streak hook.
     Round 16 - records WHAT was done (walk/fed/played/brushed/litter)
     so the home has a real care log feed."""
@@ -854,8 +881,9 @@ def pet_checkin(pid: int, body: dict = None):
     action = str(body.get("action", "care"))
     today = str(_dt.date.today())
     db = _db()
-    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
-        raise HTTPException(404, "pet not found")
+    uid = _require_user(x_token)
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
     # prevent double-counting a single day
     if db.execute("SELECT 1 FROM care_checks WHERE pet_id=? AND check_date=?",
                   (pid, today)).fetchone():
@@ -979,15 +1007,16 @@ class MealIn(BaseModel):
 
 
 @app.post("/api/v1/meals")
-def log_meal(body: MealIn):
+def log_meal(body: MealIn, x_token: str = Header(default="")):
     """ROUND 21 - THE FEEDING LOG: the daily habit + the data moat.
     Every meal logged = a consumption data point brands cannot buy
     ('share of stomach' - what's actually fed, when, whether it switched).
     Capped at 4 meals/day/pet to prevent gaming."""
     import datetime as _dt
     db = _db()
-    if not db.execute("SELECT 1 FROM pets WHERE id=?", (body.pet_id,)).fetchone():
-        raise HTTPException(404, "pet not found")
+    uid = _require_user(x_token)
+    if not _owns_pet(db, body.pet_id, uid):
+        raise HTTPException(403, "you don't own this pet")
     today = str(_dt.date.today())
     n = db.execute("SELECT COUNT(*) AS c FROM meals WHERE pet_id=? "
                    "AND date(meal_time)=?", (body.pet_id, today)).fetchone()["c"]

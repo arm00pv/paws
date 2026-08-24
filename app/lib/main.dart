@@ -13,6 +13,7 @@ import 'package:image/image.dart' as img;
 import 'scan_screen.dart';
 import 'notifications.dart';
 import 'weight_chart.dart';
+import 'account.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
@@ -106,9 +107,25 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    await Account.load();          // load the stored token (round 29)
+    initNotifications();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForUpdate();
+      if (!Account.loggedIn) _showAccountGate();
+    });
     _load();
-    initNotifications();  // the reminder engine (round 22)
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  void _showAccountGate() {
+    showDialog(context: context, barrierDismissible: false, builder: (ctx) =>
+        AccountScreen(onDone: () {
+          Navigator.pop(ctx);
+          _load();
+        }));
   }
 
   /// THE AUTO-UPDATER: compare the GitHub latest release with our version.
@@ -890,7 +907,7 @@ class _HomePageState extends State<HomePage> {
     if (_pets.isEmpty) return;
     final pid = _carePetId != 0 ? _carePetId : _pets.first['id'];
     await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'),
-        headers: {'Content-Type': 'application/json'},
+        headers: Account.headers(),
         body: jsonEncode({'action': what}));
     _load();
     if (mounted) {
@@ -986,7 +1003,7 @@ class _HomePageState extends State<HomePage> {
         ElevatedButton(onPressed: () async {
           if (name.text.trim().isEmpty) return;
           await http.post(Uri.parse('$API/api/v1/pets'),
-            headers: {'Content-Type': 'application/json'},
+            headers: Account.headers(),
             body: jsonEncode({'name': name.text, 'breed': breed.text,
                               'species': species.toLowerCase(), 'dob': dob.text,
                               'weight': double.tryParse(weight.text) ?? 0}));
@@ -1345,7 +1362,7 @@ class _PetPageState extends State<PetPage> {
         const SnackBar(content: Text('Reading the receipt with the vision model…')));
     final ocrResp = await http.post(
         Uri.parse('$API/api/v1/ocr-receipt'),
-        headers: {'Content-Type': 'application/json'},
+        headers: Account.headers(),
         body: jsonEncode({'image_b64': b64}));
     final ocr = jsonDecode(ocrResp.body);
     final text = ocr['text'] ?? '';
@@ -1413,7 +1430,8 @@ class _PetPageState extends State<PetPage> {
   }
 
   Future<void> _checkIn() async {
-    await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/checkin'));
+    await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/checkin'),
+        headers: Account.headers());
     _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1437,7 +1455,7 @@ class _PetPageState extends State<PetPage> {
     final b64 = base64Encode(outBytes);
     await http.post(
         Uri.parse('$API/api/v1/pets/${widget.petId}/photo'),
-        headers: {'Content-Type': 'application/json'},
+        headers: Account.headers(),
         body: jsonEncode({'image_b64': b64}));
     _load();
     if (mounted) {
@@ -1788,7 +1806,7 @@ class _PetPageState extends State<PetPage> {
     );
     if (confirmed != true) return;
     await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/events'),
-        headers: {'Content-Type': 'application/json'},
+        headers: Account.headers(),
         body: jsonEncode({'kind': kind, 'name': name ?? (kind == 'vaccine' ? 'Vaccine' : 'Vet visit'),
                           'date': dateCtrl.text.trim()}));
     _load();
