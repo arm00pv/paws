@@ -119,6 +119,12 @@ def _db() -> sqlite3.Connection:
         pet_id INTEGER NOT NULL, kind TEXT NOT NULL,
         dismissed_at TEXT, PRIMARY KEY (pet_id, kind)
     );
+    CREATE TABLE IF NOT EXISTS coupon_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL, code TEXT NOT NULL,
+        title TEXT, action TEXT DEFAULT 'redeemed',
+        created_at TEXT
+    );
     """)
     return conn
 
@@ -529,7 +535,8 @@ def pet_digest(pid: int):
 
 @app.post("/api/v1/coupons/{code}/redeem")
 def redeem_coupon(code: str):
-    """Phase 4 - mark a minted coupon redeemed (single-use closure)."""
+    """Phase 4 - mark a minted coupon redeemed (single-use closure).
+    Round 19 - logs the redemption to the activity feed."""
     db = _db()
     cur = db.execute("UPDATE coupons SET redeemed=1 WHERE code=? AND redeemed=0",
                      (code,))
@@ -539,6 +546,11 @@ def redeem_coupon(code: str):
         if not c:
             raise HTTPException(404, "coupon not found")
         raise HTTPException(400, "coupon already redeemed")
+    c = db.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+    db.execute("INSERT INTO coupon_events (pet_id,code,title,action) "
+               "VALUES (?,?,?,?)",
+               (c["pet_id"], code, c["title"], "redeemed"))
+    db.commit()
     return {"ok": True, "code": code}
 
 
@@ -698,12 +710,19 @@ def activity(user_id: int = 0, limit: int = 8):
         FROM health_events h JOIN pets p ON h.pet_id = p.id
         WHERE (? = 0 OR p.user_id = ?)
         ORDER BY h.id DESC LIMIT 4""", (user_id, user_id)).fetchall()
+    # Round 19: coupon redemptions join the activity feed
+    ce = db.execute("""
+        SELECT ce.title, ce.action, ce.created_at, p.name AS pet
+        FROM coupon_events ce JOIN pets p ON ce.pet_id = p.id
+        WHERE (? = 0 OR p.user_id = ?)
+        ORDER BY ce.id DESC LIMIT 4""", (user_id, user_id)).fetchall()
     pts = db.execute("""
         SELECT COALESCE(SUM(l.amount),0) AS t
         FROM points_ledger l JOIN pets p ON l.pet_id = p.id
         WHERE (? = 0 OR p.user_id = ?)""", (user_id, user_id)).fetchone()["t"]
     return {"points": pts, "receipts": [dict(r) for r in rows],
-            "events": [dict(r) for r in ev]}
+            "events": [dict(r) for r in ev],
+            "coupon_events": [dict(r) for r in ce]}
 
 
 @app.get("/api/v1/home")
@@ -879,6 +898,36 @@ def receipt_history(pid: int):
                     "amount": r["amount"], "date": r["date"],
                     "items": [dict(i) for i in items]})
     return {"history": out}
+
+
+@app.get("/api/v1/coupons/{code}/validate")
+def validate_coupon(code: str):
+    """Round 19 - THE SHOP-SIDE VALIDATION: how a retailer checks a
+    coupon is real. The shop scans the GS1 barcode (or types the code)
+    and calls this endpoint. We return the honest verdict.
+
+    THIS IS THE HONEST DESIGN: the GS1 DataBar carries the offer, but
+    real retail settlement needs the brand's registered prefix + Coupon
+    Bureau. Until then, THIS endpoint is the validation path — the shop
+    checks with us, we check the ledger (single-use, not expired)."""
+    db = _db()
+    c = db.execute("SELECT * FROM coupons WHERE code=?", (code,)).fetchone()
+    if not c:
+        return {"verdict": "UNKNOWN", "reason": "no such coupon"}
+    if c["redeemed"]:
+        return {"verdict": "ALREADY_REDEEMED",
+                "reason": "this coupon was already used"}
+    # expiry: coupons are valid 90 days from mint (the catalog sets it)
+    import datetime as _dt
+    try:
+        minted = _dt.date.fromisoformat(c["created_at"])
+        if (_dt.date.today() - minted).days > 90:
+            return {"verdict": "EXPIRED", "reason": "coupon is past 90 days"}
+    except Exception:
+        pass
+    return {"verdict": "VALID", "title": c["title"],
+            "brand": c["brand"], "gs1": c["barcode"],
+            "note": "present this to the cashier"}
 
 
 @app.get("/api/v1/health")

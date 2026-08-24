@@ -327,6 +327,20 @@ class _HomePageState extends State<HomePage> {
                   style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.greenAccent)),
             ),
           ),
+        // ── COUPON REDEMPTIONS (the user's ask: see them in activity) ──
+        if ((_activity['coupon_events'] ?? []).isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Text('Coupon redemptions',
+              style: TextStyle(fontWeight: FontWeight.bold)),
+          for (final ce in (_activity['coupon_events'] as List).take(4))
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.confirmation_number, color: Colors.greenAccent),
+                title: Text('${ce['pet']} redeemed: ${ce['title']}'),
+                subtitle: Text('${ce['action']}'),
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -1312,16 +1326,47 @@ class _PetPageState extends State<PetPage> {
     final code = coupon['code'];
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: Text('${coupon['title']}'),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
+      content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // the REAL GS1 DataBar (retail-POS scannable)
         FutureBuilder<Uint8List>(
           future: http.readBytes(Uri.parse('$API/api/v1/coupons/$code/barcode.png')),
           builder: (c, snap) => snap.hasData
-              ? Image.memory(snap.data!, width: 260)
+              ? Image.memory(snap.data!, width: 280)
               : const CircularProgressIndicator(),
         ),
         const SizedBox(height: 8),
-        Text(code, style: const TextStyle(fontFamily: 'monospace')),
-      ]),
+        // the GS1 payload (the machine-readable offer)
+        Text('GS1: ${coupon['barcode']}',
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 10)),
+        const SizedBox(height: 8),
+        // the LIVE validation verdict — what the shop sees when they check
+        FutureBuilder<http.Response>(
+          future: http.get(Uri.parse('$API/api/v1/coupons/$code/validate')),
+          builder: (c, snap) {
+            if (!snap.hasData) return const SizedBox.shrink();
+            try {
+              final v = jsonDecode(snap.data!.body);
+              final ok = v['verdict'] == 'VALID';
+              return Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: ok ? const Color(0x3322B573) : const Color(0x33E53935),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  ok ? '✓ VALID — show to the cashier'
+                      : '${v['verdict']} — ${v['reason'] ?? ''}',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: ok ? Colors.greenAccent : Colors.redAccent),
+                ),
+              );
+            } catch (_) {
+              return const SizedBox.shrink();
+            }
+          },
+        ),
+      ])),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
     ));
   }
