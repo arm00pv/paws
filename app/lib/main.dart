@@ -1268,7 +1268,19 @@ class _PetPageState extends State<PetPage> {
           Expanded(child: OutlinedButton.icon(
               onPressed: _showPassport,
               icon: const Icon(Icons.badge),
-              label: const Text('Pet passport'))),
+              label: const Text('Passport'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showPortion,
+              icon: const Icon(Icons.scale),
+              label: const Text('Portion guide'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showMeals,
+              icon: const Icon(Icons.food_bank),
+              label: const Text('Meals'))),
         ]),
         const SizedBox(height: 8),
         Row(children: [
@@ -1540,6 +1552,29 @@ class _PetPageState extends State<PetPage> {
         const Text('Show this to any vet, groomer or boarder.',
             style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  Future<void> _showPortion() async {
+    final r = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/portion'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Daily portion guide'),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('${d['grams_per_day']}g per day',
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFFFFB45E))),
+        const SizedBox(height: 4),
+        Text('${d['grams_per_meal_2x']}g per meal (2x/day)',
+            style: const TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Text('${d['calories_per_day']} kcal/day · ${d['stage']} · ${d['food_kcal_per_100g']} kcal/100g dry',
+            style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        const SizedBox(height: 8),
+        Text(d['note'] ?? '',
+            style: const TextStyle(fontSize: 12)),
+      ]),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
     ));
   }

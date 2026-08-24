@@ -1246,6 +1246,22 @@ def pet_passport(pid: int):
                             [dict(w) for w in weights])
 
 
+@app.get("/api/v1/pets/{pid}/portion")
+def portion_calc(pid: int, food_type: str = "dry"):
+    """ROUND 27 (reviewer #7) - THE PORTION CALCULATOR: weight x age x
+    activity -> daily grams of the food you feed. Makes the feeding log
+    USEFUL (portion confusion is a top-3 pet-parent question)."""
+    from portions import daily_grams
+    db = _db()
+    p = db.execute("SELECT * FROM pets WHERE id=?", (pid,)).fetchone()
+    if not p:
+        raise HTTPException(404, "pet not found")
+    return daily_grams(weight_kg=p["weight"] or 0, dob=p["dob"] or "",
+                       activity=p["activity"] or "normal",
+                       species=p["species"] or "dog",
+                       food_type=food_type)
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}
