@@ -632,12 +632,20 @@ def panel():
 
 
 @app.post("/api/v1/pets/{pid}/refer")
-def refer(pid: int, body: dict = None):
-    """Phase 5 - the referral loop: a pet parent refers a friend,
-    the referrer earns 150 pts (cheapest acquisition)."""
+def refer(pid: int, x_token: str = Header(default="")):
+    """Phase 5 - the referral loop: a pet parent refers a friend.
+    ROUND 31 (reviewer's honorable mention): the referral was FARMABLE -
+    +150 pts on every call with no dedup. Now once per pet."""
+    uid = _require_user(x_token)
     db = _db()
-    if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
-        raise HTTPException(404, "pet not found")
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
+    # dedup: one referral reward per pet
+    already = db.execute(
+        "SELECT 1 FROM points_ledger WHERE pet_id=? AND reason='referral'",
+        (pid,)).fetchone()
+    if already:
+        return {"code": f"PAWS-REF-{pid}", "points": 0, "already": True}
     from phase5 import referral_points
     code = referral_points(db, pid, "friend")
     _points(db, pid, 150, "referral")

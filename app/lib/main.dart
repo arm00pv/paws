@@ -907,13 +907,18 @@ class _HomePageState extends State<HomePage> {
   Future<void> _quickCheckIn(String what) async {
     if (_pets.isEmpty) return;
     final pid = _carePetId != 0 ? _carePetId : _pets.first['id'];
-    await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'),
+    final r = await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'),
         headers: Account.headers(),
         body: jsonEncode({'action': what}));
+    final d = jsonDecode(r.body);
     _load();
-    if (mounted) {
+    if (!mounted) return;
+    if (d['already'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$what logged! +25 pts · streak alive 🔥')));
+          const SnackBar(content: Text('Already logged today — come back tomorrow!')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$what logged! +${d['points'] ?? 25} pts · streak alive 🔥')));
     }
   }
 
@@ -1482,12 +1487,17 @@ class _PetPageState extends State<PetPage> {
   }
 
   Future<void> _checkIn() async {
-    await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/checkin'),
+    final r = await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/checkin'),
         headers: Account.headers());
+    final d = jsonDecode(r.body);
     _load();
-    if (mounted) {
+    if (!mounted) return;
+    if (d['already'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Care streak +1! (+25 pts)')));
+          const SnackBar(content: Text('Already logged today — come back tomorrow!')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Care streak +1! (+${d['points'] ?? 25} pts)')));
     }
   }
 
@@ -1811,8 +1821,12 @@ class _PetPageState extends State<PetPage> {
   }
 
   void _showVaccinePicker() {
-    const vaccines = ['DHPP', 'Rabies', 'Bordetella', 'Leptospirosis',
-        'Lyme', 'Heartworm', 'FleaTick'];
+    // ROUND 31: cats get a CAT vaccine list, not dog vaccines
+    final isCat = _data != null && '${(_data!['pet'] ?? {})['species']}' == 'cat';
+    final vaccines = isCat
+        ? const ['FVRCP', 'Rabies', 'Feline Leukemia', 'FleaTick', 'Deworming']
+        : const ['DHPP', 'Rabies', 'Bordetella', 'Leptospirosis',
+                 'Lyme', 'Heartworm', 'FleaTick'];
     showModalBottomSheet(context: context, builder: (ctx) => ListView(
       children: [
         const ListTile(title: Text('Which vaccine?',
