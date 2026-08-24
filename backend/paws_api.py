@@ -64,7 +64,9 @@ def _require_user(x_token: str = "") -> int:
     if not x_token:
         raise HTTPException(401, "authentication required - sign up first")
     db = _db()
-    u = db.execute("SELECT id FROM users WHERE token_hash=?", (x_token,)).fetchone()
+    import hashlib as _h3
+    u = db.execute("SELECT id FROM users WHERE token_hash=?",
+                   (_h3.sha256(x_token.encode()).hexdigest(),)).fetchone()
     if not u:
         raise HTTPException(401, "invalid token - log in again")
     return u["id"]
@@ -212,13 +214,11 @@ def add_pet(body: PetIn, x_token: str = Header(default="")):
 
 
 @app.get("/api/v1/pets")
-def pets(user_id: int = 0):
+def pets(x_token: str = Header(default="")):
+    uid = _require_user(x_token)  # SEC-1: reads are scoped, no wildcard
     db = _db()
-    if user_id:
-        rows = db.execute("SELECT * FROM pets WHERE user_id=? ORDER BY id",
-                          (user_id,)).fetchall()
-    else:
-        rows = db.execute("SELECT * FROM pets ORDER BY id").fetchall()
+    rows = db.execute("SELECT * FROM pets WHERE user_id=? ORDER BY id",
+                      (uid,)).fetchall()
     return {"pets": [dict(r) for r in rows]}
 
 
@@ -332,11 +332,16 @@ def coupon_catalog():
 
 
 @app.post("/api/v1/pets/{pid}/coupons/{catalog_id}")
-def mint_coupon(pid: int, catalog_id: str):
+def mint_coupon(pid: int, catalog_id: str, x_token: str = Header(default="")):
+    """SEC-2: the owner may mint (was unauthenticated - anyone could
+    drain a household's points into coupons)."""
+    uid = _require_user(x_token)
     cat = next((c for c in _catalog() if c["id"] == catalog_id), None)
     if not cat:
         raise HTTPException(404, "unknown coupon")
     db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
     # ROUND 20 (reviewer #6): the home shows the HOUSEHOLD balance, so
     # redemption must use the household balance too (was per-pet — the
     # home said READY TO CLAIM but the pet couldn't afford it)
@@ -489,8 +494,13 @@ class EmailIn(BaseModel):
 
 
 @app.post("/api/v1/receipts/email")
-def import_email(body: EmailIn):
-    """Phase 3: pasted Chewy/Amazon order confirmation -> purchases."""
+def import_email(body: EmailIn, x_token: str = Header(default="")):
+    """Phase 3: pasted Chewy/Amazon order confirmation -> purchases.
+    SEC-2: auth + ownership."""
+    uid = _require_user(x_token)
+    db = _db()
+    if not _owns_pet(db, body.pet_id, uid):
+        raise HTTPException(403, "you don't own this pet")
     from phase3 import parse_email_text
     parsed = parse_email_text(body.email_text)
     items = parsed["items"]
@@ -569,7 +579,8 @@ def weight_curve(pid: int):
 
 
 @app.get("/api/v1/household")
-def household(user_id: int = 0):
+def household(x_token: str = Header(default="")):
+    uid = _require_user(x_token)  # SEC-1
     """Phase 4 - all pets, one view (the family dashboard)."""
     from phase4 import household_summary
     db = _db()
@@ -592,10 +603,14 @@ def pet_digest(pid: int):
 
 
 @app.post("/api/v1/coupons/{code}/redeem")
-def redeem_coupon(code: str):
+def redeem_coupon(code: str, x_token: str = Header(default="")):
     """Phase 4 - mark a minted coupon redeemed (single-use closure).
-    Round 19 - logs the redemption to the activity feed."""
+    SEC-2: only the owner may redeem their own coupon."""
+    uid = _require_user(x_token)
     db = _db()
+    c0 = db.execute("SELECT pet_id FROM coupons WHERE code=?", (code,)).fetchone()
+    if c0 and not _owns_pet(db, c0["pet_id"], uid):
+        raise HTTPException(403, "you don't own this coupon")
     cur = db.execute("UPDATE coupons SET redeemed=1 WHERE code=? AND redeemed=0",
                      (code,))
     db.commit()
@@ -631,12 +646,13 @@ def refer(pid: int, x_token: str = Header(default="")):
     db = _db()
     if not _owns_pet(db, pid, uid):
         raise HTTPException(403, "you don't own this pet")
-    # dedup: one referral reward per pet
+    # SEC-4: dedup per USER (was per-pet — farmable across pets:
+    # create pet -> +100 -> refer -> +150 -> repeat)
     already = db.execute(
-        "SELECT 1 FROM points_ledger WHERE pet_id=? AND reason='referral'",
-        (pid,)).fetchone()
+        "SELECT 1 FROM points_ledger l JOIN pets p ON l.pet_id = p.id "
+        "WHERE p.user_id=? AND l.reason='referral'", (uid,)).fetchone()
     if already:
-        return {"code": f"PAWS-REF-{pid}", "points": 0, "already": True}
+        return {"code": f"PAWS-REF-{uid}", "points": 0, "already": True}
     from phase5 import referral_points
     code = referral_points(db, pid, "friend")
     _points(db, pid, 150, "referral")
@@ -666,12 +682,18 @@ def barcode_teach(upc: str, body: BarcodeIn):
 
 
 @app.post("/api/v1/receipts/barcode")
-def add_barcode_receipt(body: dict = None):
+def add_barcode_receipt(body: dict = None, x_token: str = Header(default="")):
     """Phase 6 - scan a barcode -> a one-line purchase + points.
-    body: {pet_id, upc, brand, product, category, amount}"""
+    SEC-2: auth + amount cap (was an unauthenticated points printer)."""
+    uid = _require_user(x_token)
     body = body or {}
     from phase6 import lookup
     db = _db()
+    if not _owns_pet(db, int(body.get("pet_id", 0)), uid):
+        raise HTTPException(403, "you don't own this pet")
+    amount = float(body.get("amount") or 0)
+    if amount > 10000:
+        raise HTTPException(400, "amount too large")
     upc = str(body.get("upc", "")).strip()
     if not upc:
         raise HTTPException(400, "no barcode")
@@ -685,7 +707,6 @@ def add_barcode_receipt(body: dict = None):
     if not is_pet_product(brand, product):
         raise HTTPException(400,
             "not a pet product - PAWS only rewards pet-supply purchases")
-    amount = float(body.get("amount") or 0)
     db.execute("INSERT INTO receipts (pet_id,store,amount) VALUES (?,?,?)",
                (body.get("pet_id", 1), "Barcode", str(amount)))
     rid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -715,9 +736,11 @@ def signup(body: SignupIn):
     db = _db()
     if db.execute("SELECT 1 FROM users WHERE email=?", (email,)).fetchone():
         raise HTTPException(400, "email already registered")
-    token = _h.sha256(f"{email}:{int(time.time()*1000)}".encode()).hexdigest()[:32]
+    import secrets as _secrets
+    token = _secrets.token_urlsafe(32)  # SEC-5: high-entropy, not a timestamp
+    token_hash = _h.sha256(token.encode()).hexdigest()  # store the hash, not the token
     cur = db.execute("INSERT INTO users (email,name,token_hash) VALUES (?,?,?)",
-                     (email, body.name or email.split("@")[0], token))
+                     (email, body.name or email.split("@")[0], token_hash))
     db.commit()
     return {"user_id": cur.lastrowid, "token": token,
             "message": "welcome to PAWS"}
@@ -733,14 +756,17 @@ def login(body: LoginIn):
     db = _db()
     u = db.execute("SELECT * FROM users WHERE email=?",
                    (body.email.strip().lower(),)).fetchone()
-    if not u or u["token_hash"] != body.token:
+    import hashlib as _h2
+    if not u or u["token_hash"] != _h2.sha256(body.token.encode()).hexdigest():
         raise HTTPException(401, "invalid credentials")
     return {"ok": True, "user_id": u["id"], "email": u["email"],
             "name": u["name"]}
 
 
 @app.get("/api/v1/users")
-def users():
+def users(x_token: str = Header(default="")):
+    """SEC-5: was unauthenticated - exposed the full user roster."""
+    _require_user(x_token)
     db = _db()
     rows = db.execute("SELECT id,email,name,created_at FROM users").fetchall()
     return {"users": [dict(r) for r in rows]}
@@ -752,8 +778,12 @@ class PhotoIn(BaseModel):
 
 @app.post("/api/v1/pets/{pid}/photo")
 def set_photo(pid: int, body: PhotoIn, x_token: str = Header(default="")):
-    """UX review fix: pet photos (the emotional core)."""
+    """UX review fix: pet photos (the emotional core).
+    SEC-2: the token was declared but never validated - now enforced."""
+    uid = _require_user(x_token)
     db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
     if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
         raise HTTPException(404, "pet not found")
     db.execute("UPDATE pets SET photo=? WHERE id=?", (body.image_b64, pid))
@@ -762,43 +792,45 @@ def set_photo(pid: int, body: PhotoIn, x_token: str = Header(default="")):
 
 
 @app.get("/api/v1/activity")
-def activity(user_id: int = 0, limit: int = 8):
+def activity(x_token: str = Header(default=""), limit: int = 8):
+    uid = _require_user(x_token)  # SEC-1
     """Round 9 - the home activity feed: recent receipts + coupons with
     the pet name, so the home screen shows life, not void."""
     db = _db()
     rows = db.execute("""
         SELECT r.id, r.store, r.amount, r.date, p.name AS pet
         FROM receipts r JOIN pets p ON r.pet_id = p.id
-        WHERE (? = 0 OR p.user_id = ?)
-        ORDER BY r.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()
+        WHERE p.user_id=?
+        ORDER BY r.id DESC LIMIT ?""", (uid, limit)).fetchall()
     ev = db.execute("""
         SELECT h.kind, h.name, h.date, p.name AS pet
         FROM health_events h JOIN pets p ON h.pet_id = p.id
-        WHERE (? = 0 OR p.user_id = ?)
-        ORDER BY h.id DESC LIMIT 4""", (user_id, user_id)).fetchall()
+        WHERE p.user_id=?
+        ORDER BY h.id DESC LIMIT 4""", (uid,)).fetchall()
     # Round 19: coupon redemptions join the activity feed
     ce = db.execute("""
         SELECT ce.title, ce.action, ce.created_at, p.name AS pet
         FROM coupon_events ce JOIN pets p ON ce.pet_id = p.id
-        WHERE (? = 0 OR p.user_id = ?)
-        ORDER BY ce.id DESC LIMIT 4""", (user_id, user_id)).fetchall()
+        WHERE p.user_id=?
+        ORDER BY ce.id DESC LIMIT 4""", (uid,)).fetchall()
     pts = db.execute("""
         SELECT COALESCE(SUM(l.amount),0) AS t
         FROM points_ledger l JOIN pets p ON l.pet_id = p.id
-        WHERE (? = 0 OR p.user_id = ?)""", (user_id, user_id)).fetchone()["t"]
+        WHERE p.user_id=?""", (uid,)).fetchone()["t"]
     return {"points": pts, "receipts": [dict(r) for r in rows],
             "events": [dict(r) for r in ev],
             "coupon_events": [dict(r) for r in ce]}
 
 
 @app.get("/api/v1/home")
-def home_dashboard(user_id: int = 0):
+def home_dashboard(x_token: str = Header(default="")):
+    uid = _require_user(x_token)  # SEC-1
     """Round 10 - the home needs content: action-required (overdue
     vaccines / expiring coupons) + the rewards showcase (catalog with
     affordability) + birthdays. Kills the void with USEFUL content."""
     db = _db()
-    pets = db.execute("SELECT * FROM pets WHERE (?=0 OR user_id=?) ORDER BY id",
-                      (user_id, user_id)).fetchall()
+    pets = db.execute("SELECT * FROM pets WHERE user_id=? ORDER BY id",
+                      (uid,)).fetchall()
     # action-required: overdue vaccines per pet
     from vaccine_schedule import summarize
     actions = []
@@ -822,8 +854,8 @@ def home_dashboard(user_id: int = 0):
     coupons = db.execute("""
         SELECT c.title, c.pet_id, p.name AS pet, c.created_at
         FROM coupons c JOIN pets p ON c.pet_id = p.id
-        WHERE (?=0 OR p.user_id=?) AND c.redeemed=0
-        ORDER BY c.id DESC LIMIT 3""", (user_id, user_id)).fetchall()
+        WHERE p.user_id=? AND c.redeemed=0
+        ORDER BY c.id DESC LIMIT 3""", (uid,)).fetchall()
     for c in coupons:
         actions.append({"type": "coupon_ready", "pet": c["pet"],
                         "pet_id": c["pet_id"], "about": c["title"]})
@@ -832,7 +864,7 @@ def home_dashboard(user_id: int = 0):
     pts = db.execute("""
         SELECT COALESCE(SUM(l.amount),0) AS t
         FROM points_ledger l JOIN pets p ON l.pet_id = p.id
-        WHERE (?=0 OR p.user_id=?)""", (user_id, user_id)).fetchone()["t"]
+        WHERE p.user_id=?""", (uid,)).fetchone()["t"]
     for c in _catalog():
         cost = c.get("points", 0)
         progress = round(min(100.0 * pts / cost, 100.0), 0) if cost else 0
@@ -936,15 +968,16 @@ def dismiss(pid: int, body: dict = None):
 
 
 @app.get("/api/v1/care-log")
-def care_log(user_id: int = 0, limit: int = 10):
+def care_log(x_token: str = Header(default=""), limit: int = 10):
+    uid = _require_user(x_token)  # SEC-1
     """Round 16 - the care log feed: what the pack did, when.
     Fills the home void with REAL daily activity."""
     db = _db()
     rows = db.execute("""
         SELECT c.check_date, c.action, c.created_at, p.name AS pet, p.species
         FROM care_checks c JOIN pets p ON c.pet_id = p.id
-        WHERE (?=0 OR p.user_id=?)
-        ORDER BY c.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()
+        WHERE p.user_id=?
+        ORDER BY c.id DESC LIMIT ?""", (uid, limit)).fetchall()
     return {"log": [dict(r) for r in rows]}
 
 
@@ -1043,7 +1076,8 @@ def meals(pid: int, days: int = 7):
 
 
 @app.get("/api/v1/consumption")
-def consumption(user_id: int = 0, days: int = 14):
+def consumption(x_token: str = Header(default=""), days: int = 14):
+    uid = _require_user(x_token)  # SEC-1
     """ROUND 21 - THE SHARE-OF-STOMACH PANEL: the moat.
     Consumption share by brand (meals logged), breed x brand x meals.
     This is what a brand pays for that NO retailer transaction can show."""
@@ -1054,7 +1088,7 @@ def consumption(user_id: int = 0, days: int = 14):
         FROM meals m JOIN pets pe ON m.pet_id = pe.id
         WHERE m.brand != '' AND (? = 0 OR pe.user_id = ?)
         GROUP BY m.brand, pe.breed
-        ORDER BY meals DESC LIMIT 20""", (user_id, user_id)).fetchall()
+        ORDER BY meals DESC LIMIT 20""", (uid,)).fetchall()
     total = sum(r["meals"] for r in rows) or 1
     merged = {}
     for r in rows:
@@ -1072,7 +1106,8 @@ def consumption(user_id: int = 0, days: int = 14):
 
 
 @app.get("/api/v1/recalls")
-def recalls_check(user_id: int = 0):
+def recalls_check(x_token: str = Header(default="")):
+    uid = _require_user(x_token)  # SEC-1
     """ROUND 23 - FOOD RECALL ALERTS: check what the user's pets eat
     against the FDA's public recall feed. Warns BEFORE they feed a
     recalled bag (trust) + captures switching events (recall data)."""
@@ -1084,11 +1119,11 @@ def recalls_check(user_id: int = 0):
     products = set()
     rows = db.execute("""
         SELECT m.brand, m.product FROM meals m JOIN pets p ON m.pet_id = p.id
-        WHERE (?=0 OR p.user_id=?)
+        WHERE p.user_id=?
         UNION SELECT pu.brand, pu.product FROM purchases pu
         JOIN receipts r ON pu.receipt_id = r.id
-        JOIN pets p ON r.pet_id = p.id WHERE (?=0 OR p.user_id=?)""",
-        (user_id, user_id, user_id, user_id)).fetchall()
+        JOIN pets p ON r.pet_id = p.id WHERE p.user_id=?""",
+        (uid, uid, uid, uid)).fetchall()
     for r in rows:
         if r["brand"]:
             brands.add(r["brand"])
@@ -1130,14 +1165,15 @@ def _seed_missions(db):
 
 
 @app.get("/api/v1/missions")
-def missions(user_id: int = 0):
+def missions(x_token: str = Header(default="")):
+    uid = _require_user(x_token)  # SEC-1
     """ROUND 25 (reviewer #2) - BRAND-FUNDED MISSIONS: the pilot engine.
     'Feed Hill's for 7 days -> 200 pts'. The brand funds the points;
     we track completion via the feeding log + care check-ins."""
     db = _db()
     _seed_missions(db)
-    pets = db.execute("SELECT * FROM pets WHERE (?=0 OR user_id=?) ORDER BY id",
-                      (user_id, user_id)).fetchall()
+    pets = db.execute("SELECT * FROM pets WHERE user_id=? ORDER BY id",
+                      (uid,)).fetchall()
     ms = db.execute("SELECT * FROM missions WHERE active=1").fetchall()
     out = []
     for m in ms:
@@ -1175,11 +1211,15 @@ def missions(user_id: int = 0):
 
 
 @app.post("/api/v1/missions/{mid}/claim")
-def claim_mission(mid: int, body: dict = None):
-    """Claim the mission points (once). The brand funds these."""
+def claim_mission(mid: int, body: dict = None, x_token: str = Header(default="")):
+    """Claim the mission points (once). The brand funds these.
+    SEC-2: auth + ownership (was claimable on any pet_id)."""
+    uid = _require_user(x_token)
     body = body or {}
     pet_id = int(body.get("pet_id", 0))
     db = _db()
+    if not _owns_pet(db, pet_id, uid):
+        raise HTTPException(403, "you don't own this pet")
     m = db.execute("SELECT * FROM missions WHERE id=? AND active=1",
                    (mid,)).fetchone()
     if not m:
@@ -1212,10 +1252,22 @@ def claim_mission(mid: int, body: dict = None):
                             "AND meal_time >= ?", (pid, since)).fetchone()["c"]
     if c < m["target"]:
         raise HTTPException(400, f"mission not complete yet ({c}/{m['target']})")
-    db.execute("INSERT OR REPLACE INTO mission_progress "
-               "(mission_id,pet_id,count,completed) VALUES (?,?,?,1)",
-               (mid, pet_id, c))
-    db.commit()
+    # SEC-3: ATOMIC claim - the check-then-act race let 5 concurrent
+    # claims credit 5x. INSERT ... ON CONFLICT DO NOTHING + only credit
+    # when the row was actually inserted.
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        cur = db.execute(
+            "INSERT INTO mission_progress (mission_id,pet_id,count,completed) "
+            "VALUES (?,?,?,1) "
+            "ON CONFLICT(mission_id,pet_id) DO NOTHING",
+            (mid, pet_id, c))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    if cur.rowcount == 0:
+        raise HTTPException(400, "already claimed")
     _points(db, pet_id, m["points"], f"mission_{mid}")
     return {"ok": True, "points": m["points"], "title": m["title"]}
 
@@ -1226,9 +1278,14 @@ class VetInvoiceIn(BaseModel):
 
 
 @app.post("/api/v1/vet-invoice")
-async def vet_invoice(body: VetInvoiceIn):
+async def vet_invoice(body: VetInvoiceIn, x_token: str = Header(default="")):
     """ROUND 26 - VET INVOICE CAPTURE: scan a vet invoice, OCR extracts
-    practice/date/services, auto-logs the visit + procedures."""
+    practice/date/services, auto-logs the visit + procedures.
+    SEC-2: auth + ownership (was an unauthenticated health-event injector)."""
+    uid = _require_user(x_token)
+    db = _db()
+    if not _owns_pet(db, body.pet_id, uid):
+        raise HTTPException(403, "you don't own this pet")
     from passport import _ask_vision, parse_invoice
     text = _ask_vision(body.image_b64)
     parsed = parse_invoice(text)
@@ -1300,8 +1357,11 @@ def delete_pet(pid: int, x_token: str = Header(default="")):
     db = _db()
     if not _owns_pet(db, pid, uid):
         raise HTTPException(403, "you don't own this pet")
+    # SEC-6: coupons + events + missions too (orphaned coupons stayed
+    # VALID at validate_coupon and redeemable after the pet was deleted)
     for t in ("receipts", "purchases", "health_events", "weights",
-              "care_checks", "meals", "points_ledger"):
+              "care_checks", "meals", "points_ledger", "coupons",
+              "coupon_events", "dismissed", "mission_progress"):
         try:
             db.execute(f"DELETE FROM {t} WHERE pet_id=?", (pid,))
         except Exception:
@@ -1365,6 +1425,7 @@ def delete_receipt(rid: int, x_token: str = Header(default="")):
     if not r or not _owns_pet(db, r["pet_id"], uid):
         raise HTTPException(403, "not yours")
     db.execute("DELETE FROM purchases WHERE receipt_id=?", (rid,))
+    db.execute("DELETE FROM points_ledger WHERE reason=?", (f"receipt_{rid}",))
     db.execute("DELETE FROM receipts WHERE id=?", (rid,))
     db.commit()
     return {"ok": True}

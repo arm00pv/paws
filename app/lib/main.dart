@@ -250,13 +250,17 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// SEC-1: reads are scoped - every GET carries the token.
+  Future<http.Response> _get(String path) =>
+      http.get(Uri.parse('$API$path'), headers: Account.headers());
+
   Future<void> _load() async {
     try {
-      final r = await http.get(Uri.parse('$API/api/v1/pets'));
-      final a = await http.get(Uri.parse('$API/api/v1/activity'));
-      final h = await http.get(Uri.parse('$API/api/v1/home'));
-      final cl = await http.get(Uri.parse('$API/api/v1/care-log'));
-      final ms = await http.get(Uri.parse('$API/api/v1/missions'));
+      final r = await _get('/api/v1/pets');
+      final a = await _get('/api/v1/activity');
+      final h = await _get('/api/v1/home');
+      final cl = await _get('/api/v1/care-log');
+      final ms = await _get('/api/v1/missions');
       setState(() {
         _pets = jsonDecode(r.body)['pets'];
         _activity = jsonDecode(a.body);
