@@ -84,6 +84,51 @@ def schedule_next(last_date: str, protocol_name: str,
             "interval_months": proto.interval_months}
 
 
+MED_PROTOCOLS = {
+    "FleaTick": {"interval_months": 1, "label": "Flea/tick prevention"},
+    "Heartworm": {"interval_months": 12, "label": "Heartworm prevention"},
+    "Deworming": {"interval_months": 3, "label": "Deworming"},
+}
+
+
+def med_schedule(events: list) -> dict:
+    """Round 21 - the medication tracker: last dose -> next dose for the
+    monthly/yearly preventatives (the most-forgotten pet chore)."""
+    import datetime as _dt
+    today = _dt.date.today()
+    by_name = {}
+    for e in events:
+        name = (e.get("name") or "").lower()
+        if not name:
+            continue
+        by_name[name] = e.get("date") or ""
+    out = []
+    for key, proto in MED_PROTOCOLS.items():
+        last = None
+        for n, d in by_name.items():
+            if key.lower() in n:
+                last = d
+                break
+        if not last:
+            continue
+        nxt = _months_ahead(last, proto["interval_months"])
+        days_left = 9999
+        overdue = False
+        if nxt:
+            try:
+                nd = _dt.date.fromisoformat(nxt)
+                days_left = (nd - today).days
+                overdue = days_left < 0
+            except Exception:
+                pass
+        out.append({"med": proto["label"], "key": key, "last": last,
+                    "next": nxt, "days_left": max(days_left, 0),
+                    "overdue": overdue})
+    out.sort(key=lambda x: (not x["overdue"], x["days_left"]))
+    return {"meds": out,
+            "overdue_count": sum(1 for m in out if m["overdue"])}
+
+
 def summarize(events: list) -> dict:
     """Given health events (name/date), produce the calendar:
     next-due per vaccine, overdue flags, days-until."""

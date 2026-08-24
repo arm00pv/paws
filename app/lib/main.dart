@@ -972,6 +972,34 @@ class _PetPageState extends State<PetPage> {
                   ),
                 )),
         const SizedBox(height: 8),
+        // ── THE MEDICATION TRACKER (flea/tick etc. - reviewer #4) ──
+        ...(() {
+          final meds = (((d['med_schedule'] ?? {})['meds'] ?? []) as List);
+          if (meds.isEmpty) return <Widget>[];
+          return <Widget>[
+            const Text('Medications',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            for (final m in meds)
+              Card(
+                margin: const EdgeInsets.symmetric(vertical: 3),
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(m['overdue'] ? Icons.error : Icons.medication,
+                      color: m['overdue'] ? Colors.redAccent : Colors.green),
+                  title: Text('${m['med']}'),
+                  subtitle: Text(m['overdue']
+                      ? 'OVERDUE - was due ${m['next']}'
+                      : 'next dose ${m['next']} (in ${m['days_left']}d)'),
+                  trailing: m['overdue']
+                      ? FilledButton.tonal(
+                          onPressed: () => _addEvent('med', m['key']),
+                          child: const Text('Log dose'))
+                      : null,
+                ),
+              ),
+            const SizedBox(height: 8),
+          ];
+        })(),
         Text('Health & records', style: Theme.of(context).textTheme.titleMedium),
         ...health.map((h) => ListTile(
               leading: Icon(h['kind'] == 'vaccine' ? Icons.vaccines : Icons.medical_services),
