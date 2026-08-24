@@ -6,10 +6,19 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:open_file/open_file.dart';
 import 'scan_screen.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
+
+// ── THE AUTO-UPDATER (round 18) ─────────────────────────────────────
+// The app checks GitHub for the latest release on launch; if newer,
+// it downloads the APK and opens the system installer.
+const APP_VERSION = '0.17.0';
+const UPDATE_URL = 'https://api.github.com/repos/arm00pv/paws/releases/latest';
 
 void main() => runApp(const PawsApp());
 
@@ -92,6 +101,67 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
+  }
+
+  /// THE AUTO-UPDATER: compare the GitHub latest release with our version.
+  Future<void> _checkForUpdate() async {
+    try {
+      final r = await http.get(Uri.parse(UPDATE_URL),
+          headers: {'Accept': 'application/vnd.github+json'});
+      if (r.statusCode != 200) return;
+      final d = jsonDecode(r.body);
+      final tag = (d['tag_name'] ?? '').toString().replaceFirst('v', '');
+      if (tag.isEmpty || tag == APP_VERSION) return; // up to date
+      final assets = (d['assets'] as List? ?? []);
+      if (assets.isEmpty) return;
+      final apkUrl = assets.first['browser_download_url'] as String;
+      if (!mounted) return;
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Update available'),
+        content: Text('PAWS v$tag is out (you have v$APP_VERSION).\n'
+            'Download and install the latest?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Later')),
+          FilledButton(onPressed: () {
+            Navigator.pop(ctx);
+            _downloadAndInstall(apkUrl, tag);
+          }, child: const Text('Update now')),
+        ],
+      ));
+    } catch (_) {
+      // offline / no network — the app still works
+    }
+  }
+
+  Future<void> _downloadAndInstall(String url, String tag) async {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Downloading the update…')));
+    try {
+      final resp = await http.get(Uri.parse(url));
+      if (resp.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Download failed — try again later')));
+        }
+        return;
+      }
+      // save to the app's cache dir, then open with the system installer
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/paws-$tag.apk');
+      await file.writeAsBytes(resp.bodyBytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Downloaded — opening the installer…')));
+      }
+      OpenFile.open(file.path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Update failed: $e')));
+      }
+    }
   }
 
   Future<void> _load() async {

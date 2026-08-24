@@ -1,7 +1,7 @@
 name: paws_app
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.17.0+17
 
 environment:
   sdk: ^3.12.1
@@ -12,6 +12,8 @@ dependencies:
   http: ^1.6.0
   image_picker: ^1.2.3
   mobile_scanner: ^7.4.0
+  open_file: ^4.0.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:
