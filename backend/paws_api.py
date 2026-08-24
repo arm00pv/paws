@@ -133,7 +133,8 @@ def _db() -> sqlite3.Connection:
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER NOT NULL,
         check_date TEXT,
-        action TEXT DEFAULT 'care'
+        action TEXT DEFAULT 'care',
+        created_at TEXT DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS dismissed (
         pet_id INTEGER NOT NULL, kind TEXT NOT NULL,
@@ -325,16 +326,6 @@ def points(pid: int):
 
 
 # ── THE COUPON MINT — points → manufacturer-approved scannable barcode ───
-def _code128_png(data: str) -> bytes:
-    import barcode
-    from barcode.writer import ImageWriter
-    c = barcode.get("code128", data, writer=ImageWriter())
-    buf = io.BytesIO()
-    c.write(buf, options={"module_width": 0.25, "module_height": 10,
-                          "font_size": 8, "quiet_zone": 6.5})
-    return buf.getvalue()
-
-
 @app.get("/api/v1/coupons/catalog")
 def coupon_catalog():
     return {"coupons": _catalog()}
@@ -896,8 +887,9 @@ def pet_checkin(pid: int, body: dict = None, x_token: str = Header(default="")):
     if db.execute("SELECT 1 FROM care_checks WHERE pet_id=? AND check_date=?",
                   (pid, today)).fetchone():
         return {"ok": True, "streak": _streak(db, pid), "already": True}
-    db.execute("INSERT INTO care_checks (pet_id,check_date,action) VALUES (?,?,?)",
-               (pid, today, action))
+    db.execute("INSERT INTO care_checks (pet_id,check_date,action,created_at) "
+               "VALUES (?,?,?,?)",
+               (pid, today, action, str(_dt.datetime.utcnow())))
     db.commit()
     _points(db, pid, 25, "daily_care")
     return {"ok": True, "streak": _streak(db, pid), "points": 25}
@@ -949,7 +941,7 @@ def care_log(user_id: int = 0, limit: int = 10):
     Fills the home void with REAL daily activity."""
     db = _db()
     rows = db.execute("""
-        SELECT c.check_date, c.action, p.name AS pet, p.species
+        SELECT c.check_date, c.action, c.created_at, p.name AS pet, p.species
         FROM care_checks c JOIN pets p ON c.pet_id = p.id
         WHERE (?=0 OR p.user_id=?)
         ORDER BY c.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()

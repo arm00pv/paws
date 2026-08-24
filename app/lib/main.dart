@@ -79,10 +79,6 @@ String _birthdayCountdown(String dob) {
   }
 }
 
-String _b64(String s) {
-  return s;
-}
-
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
   @override
@@ -804,7 +800,8 @@ class _HomePageState extends State<HomePage> {
                                       Expanded(child: Text(
                                           '${c['pet']} · ${c['action']}',
                                           overflow: TextOverflow.ellipsis)),
-                                      Text(_relativeDate('${c['check_date']}'),
+                                      Text(_careTime('${c['created_at'] ?? ''}',
+                                              '${c['check_date']}'),
                                           style: Theme.of(context).textTheme.bodySmall),
                                     ]),
                                   ),
@@ -871,6 +868,19 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
+  }
+
+  String _careTime(String created, String fallbackDate) {
+    // ROUND 32 (agy's co-parenting idea): 'Fed at 7:45' not just 'Today'
+    if (created.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(created).toLocal();
+        final h = dt.hour.toString().padLeft(2, '0');
+        final m = dt.minute.toString().padLeft(2, '0');
+        return '${_relativeDate(created.substring(0, 10))} · $h:$m';
+      } catch (_) {}
+    }
+    return _relativeDate(fallbackDate);
   }
 
   String _relativeDate(String iso) {
