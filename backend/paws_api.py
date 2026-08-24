@@ -708,6 +708,7 @@ def home_dashboard(user_id: int = 0):
     # action-required: overdue vaccines per pet
     from vaccine_schedule import summarize
     actions = []
+    import datetime as _dt
     for p in pets:
         ev = db.execute("SELECT name,date FROM health_events WHERE pet_id=?",
                         (p["id"],)).fetchall()
@@ -715,7 +716,8 @@ def home_dashboard(user_id: int = 0):
         for c in cal.get("calendar", []):
             if c["overdue"]:
                 actions.append({"type": "vaccine_overdue", "pet": p["name"],
-                                "pet_id": p["id"], "vaccine": c["vaccine"]})
+                                "pet_id": p["id"], "vaccine": c["vaccine"],
+                                "due": c["next"], "days_left": c["days_left"]})
         if not ev:
             actions.append({"type": "first_vaccine", "pet": p["name"],
                             "pet_id": p["id"],
@@ -729,20 +731,32 @@ def home_dashboard(user_id: int = 0):
     for c in coupons:
         actions.append({"type": "coupon_ready", "pet": c["pet"],
                         "pet_id": c["pet_id"], "about": c["title"]})
-    # rewards showcase: the coupon catalog with affordability + pet points
+    # rewards showcase: progress toward each coupon (the visual hook)
     showcase = []
+    pts = db.execute("""
+        SELECT COALESCE(SUM(l.amount),0) AS t
+        FROM points_ledger l JOIN pets p ON l.pet_id = p.id
+        WHERE (?=0 OR p.user_id=?)""", (user_id, user_id)).fetchone()["t"]
     for c in _catalog():
-        pts = db.execute("""
-            SELECT COALESCE(SUM(l.amount),0) AS t
-            FROM points_ledger l JOIN pets p ON l.pet_id = p.id
-            WHERE (?=0 OR p.user_id=?)""", (user_id, user_id)).fetchone()["t"]
+        cost = c.get("points", 0)
+        progress = round(min(100.0 * pts / cost, 100.0), 0) if cost else 0
         showcase.append({"id": c["id"], "title": c["title"],
-                         "brand": c["brand"], "points": c["points"],
-                         "affordable": pts >= c["points"]})
-    return {"actions": actions, "showcase": showcase,
-            "pets": [{"id": p["id"], "name": p["name"],
-                      "species": p["species"], "dob": p["dob"],
-                      "photo": (p["photo"] or "")[:40]} for p in pets]}
+                         "brand": c["brand"], "points": cost,
+                         "affordable": pts >= cost,
+                         "progress": progress,
+                         "needed": max(cost - pts, 0)})
+    # per-pet streak + care stats (fills the home with life)
+    pet_stats = []
+    for p in pets:
+        pet_stats.append({
+            "id": p["id"], "name": p["name"], "species": p["species"],
+            "dob": p["dob"], "weight": p["weight"],
+            "streak": _streak(db, p["id"]),
+            "receipts": db.execute(
+                "SELECT COUNT(*) AS c FROM receipts WHERE pet_id=?",
+                (p["id"],)).fetchone()["c"]})
+    return {"actions": actions, "showcase": showcase, "points": pts,
+            "pet_stats": pet_stats}
 
 
 @app.post("/api/v1/pets/{pid}/checkin")

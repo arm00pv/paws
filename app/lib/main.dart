@@ -182,13 +182,35 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 8),
         for (final s in show)
           Card(
-            child: ListTile(
-              leading: const Icon(Icons.confirmation_number),
-              title: Text('${s['title']}'),
-              subtitle: Text('${s['brand']}'),
-              trailing: Text('${s['points']} pts',
-                  style: TextStyle(fontWeight: FontWeight.w600,
-                      color: s['affordable'] == true ? Colors.greenAccent : Colors.grey)),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  const Icon(Icons.confirmation_number, size: 18),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text('${s['title']}',
+                      style: const TextStyle(fontWeight: FontWeight.w600))),
+                  Text('${s['points']} pts',
+                      style: TextStyle(fontWeight: FontWeight.bold,
+                          color: s['affordable'] == true ? Colors.greenAccent : Colors.grey)),
+                ]),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (s['progress'] ?? 0) / 100.0,
+                    minHeight: 8,
+                    backgroundColor: Colors.white10,
+                    color: s['affordable'] == true ? Colors.greenAccent : const Color(0xFFFFB45E),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  s['affordable'] == true
+                      ? 'Ready to claim!'
+                      : '${s['needed'] ?? 0} more pts to unlock',
+                  style: Theme.of(context).textTheme.bodySmall),
+              ]),
             ),
           ),
         const SizedBox(height: 8),
@@ -252,6 +274,19 @@ class _HomePageState extends State<HomePage> {
                               Text('${_pets.length} fur baby${_pets.length == 1 ? '' : 'ies'} · ${_activity['points'] ?? 0} paw points',
                                   style: Theme.of(context).textTheme.bodySmall
                                       ?.copyWith(color: const Color(0xFFFFD9A0), fontWeight: FontWeight.w600)),
+                              if ((_home['pet_stats'] ?? []).isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Wrap(spacing: 6, children: [
+                                  for (final ps in (_home['pet_stats'] as List).take(3))
+                                    if ((ps['streak'] ?? 0) > 0)
+                                      Chip(
+                                        avatar: const Icon(Icons.local_fire_department, size: 14, color: Color(0xFFFFB45E)),
+                                        label: Text('${ps['name']} · ${ps['streak']}d streak'),
+                                        visualDensity: VisualDensity.compact,
+                                        backgroundColor: Colors.white10,
+                                      ),
+                                ]),
+                              ],
                               const SizedBox(height: 10),
                               Row(children: [
                                 Expanded(child: FilledButton.icon(
@@ -323,7 +358,8 @@ class _HomePageState extends State<HomePage> {
                                               ? Colors.redAccent : null),
                                       const SizedBox(width: 6),
                                       Expanded(child: Text(
-                                          '${act['pet']}: ${act['vaccine'] ?? act['about'] ?? ''}',
+                                          '${act['pet']}: ${act['vaccine'] ?? act['about'] ?? ''}'
+                                          '${act['due'] != null ? ' (due ${act['due']})' : ''}',
                                           overflow: TextOverflow.ellipsis)),
                                     ]),
                                   ),
