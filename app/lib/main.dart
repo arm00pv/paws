@@ -902,6 +902,13 @@ class _PetPageState extends State<PetPage> {
         const SizedBox(height: 8),
         Row(children: [
           Expanded(child: OutlinedButton.icon(
+              onPressed: _showHistory,
+              icon: const Icon(Icons.receipt_long),
+              label: const Text('Scan history'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
               onPressed: _showSpend,
               icon: const Icon(Icons.pie_chart),
               label: const Text('Brand history'))),
@@ -1029,6 +1036,38 @@ class _PetPageState extends State<PetPage> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Photo saved — what a cutie!')));
     }
+  }
+
+  Future<void> _showHistory() async {
+    final r = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/history'));
+    final d = jsonDecode(r.body);
+    final hist = (d['history'] as List? ?? []);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Scan history (${hist.length})'),
+      content: SizedBox(width: 340, child: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min, children: [
+        for (final h in hist.take(20))
+          Card(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Expanded(child: Text('${h['store']} · \$${h['amount']}',
+                      style: const TextStyle(fontWeight: FontWeight.w600))),
+                  Text('${h['date'] ?? ''}',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ]),
+                for (final i in (h['items'] as List? ?? []).take(3))
+                  Text('  • ${i['brand']} ${i['product']}',
+                      style: Theme.of(context).textTheme.bodySmall),
+              ]),
+            ),
+          ),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
   }
 
   void _scanBarcode() {

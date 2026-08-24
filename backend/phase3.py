@@ -42,6 +42,56 @@ def normalize_brand(raw: str) -> str:
 
 
 # ── EMAIL IMPORT ─────────────────────────────────────────────────────
+# ── RECEIPT VALIDATION — the user's point: not ANYTHING can be a receipt ──
+# The vision model must confirm store + date + line items before a scan
+# counts. A random photo (dog, wall, person) is rejected.
+RECEIPT_HINTS = ("store", "receipt", "total", "subtotal", "tax", "thank you",
+                 "qty", "item", "price", "cashier", "register", "order",
+                 "checkout", "purchase", "sold", "amount", "payment")
+
+
+def validate_receipt_text(text: str) -> dict:
+    """Heuristic receipt check: does the OCR text look like a receipt?
+    Returns {ok, reason}. The vision model's JSON (store/date/items) is
+    the primary signal; the raw text is the fallback."""
+    low = text.lower()
+    hits = sum(1 for h in RECEIPT_HINTS if h in low)
+    has_store = any(k in low for k in ("store", "petsmart", "chewy", "petco",
+                                       "amazon", "walmart", "target", "costco",
+                                       "pet supplies", "pets first"))
+    has_money = "$" in text or "total" in low or "subtotal" in low
+    if has_store and (has_money or hits >= 2):
+        return {"ok": True, "reason": "receipt-like (store + money)"}
+    if hits >= 3 and has_money:
+        return {"ok": True, "reason": "receipt-like (items + money)"}
+    return {"ok": False,
+            "reason": "does not look like a receipt (no store/items/money) — "
+                      "only pet-supply receipts earn points"}
+
+
+# ── UPC PET-PRODUCT CHECK — the user's point: a UPC must be a pet product ──
+# The panel's own catalog + a pet-brand whitelist gate what counts.
+PET_BRANDS = ("royal canin", "purina", "hill", "blue buffalo", "greenies",
+              "pedigree", "friskies", "beneful", "kong", "chuckit", "barkbox",
+              "zesty paws", "farmer", "ollie", "vetmedin", "petco", "petsmart",
+              "chewy", "whiskas", "fancy feast", "temptations", "meow mix",
+              "iams", "eukanuba", "nutro", "taste of the wild", "orijen",
+              "acana", "wellness", "nulo", "stella", "chewy")
+
+
+def is_pet_product(brand: str, product: str) -> bool:
+    """Is this a pet product? The brand whitelist + product hints."""
+    b = (brand or "").lower()
+    p = (product or "").lower()
+    if any(k in b for k in PET_BRANDS):
+        return True
+    if any(k in p for k in ("dog", "cat", "puppy", "kitten", "pet", "kibble",
+                            "treat", "litter", "chew", "toy", "collar",
+                            "leash", "bowl", "food", "dental")):
+        return True
+    return False
+
+
 def parse_email_text(text: str) -> dict:
     """Parse a pasted Chewy/Amazon order confirmation: line items.
     No OAuth — the user pastes the email; we extract mechanically."""

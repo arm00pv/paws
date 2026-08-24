@@ -602,6 +602,11 @@ def add_barcode_receipt(body: dict = None):
     product = body.get("product") or (info.get("product") if info.get("ok") else "")
     if not product:
         raise HTTPException(400, "unknown barcode - teach it first")
+    # THE PET-PRODUCT GATE: a UPC must be a pet product to earn points
+    from phase3 import is_pet_product
+    if not is_pet_product(brand, product):
+        raise HTTPException(400,
+            "not a pet product - PAWS only rewards pet-supply purchases")
     amount = float(body.get("amount") or 0)
     db.execute("INSERT INTO receipts (pet_id,store,amount) VALUES (?,?,?)",
                (body.get("pet_id", 1), "Barcode", str(amount)))
@@ -854,6 +859,26 @@ def care_log(user_id: int = 0, limit: int = 10):
         WHERE (?=0 OR p.user_id=?)
         ORDER BY c.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()
     return {"log": [dict(r) for r in rows]}
+
+
+@app.get("/api/v1/pets/{pid}/history")
+def receipt_history(pid: int):
+    """Round 17 - the receipt HISTORY view: every scan with its items.
+    The user asked where the scan history is - it's now a real view."""
+    db = _db()
+    rows = db.execute("""
+        SELECT r.id, r.store, r.amount, r.date, r.raw_ocr
+        FROM receipts r WHERE r.pet_id=? ORDER BY r.id DESC LIMIT 30""",
+        (pid,)).fetchall()
+    out = []
+    for r in rows:
+        items = db.execute("""
+            SELECT brand, product, amount FROM purchases
+            WHERE receipt_id=? ORDER BY id""", (r["id"],)).fetchall()
+        out.append({"id": r["id"], "store": r["store"],
+                    "amount": r["amount"], "date": r["date"],
+                    "items": [dict(i) for i in items]})
+    return {"history": out}
 
 
 @app.get("/api/v1/health")
