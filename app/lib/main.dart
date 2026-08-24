@@ -60,7 +60,7 @@ String _birthdayCountdown(String dob) {
       next = DateTime(now.year + 1, d.month, d.day);
     }
     final days = next.difference(DateTime(now.year, now.month, now.day)).inDays;
-    return days == 0 ? '🎂 birthday today!' : '🎂 in $days days';
+    return days == 0 ? 'birthday today!' : 'birthday in $days days';
   } catch (_) {
     return '';
   }
@@ -83,6 +83,8 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   String? _error;
   int _tab = 0;
+  int _carePetId = 0;
+  String _carePetName = '';
 
   @override
   void initState() {
@@ -99,6 +101,10 @@ class _HomePageState extends State<HomePage> {
         _pets = jsonDecode(r.body)['pets'];
         _activity = jsonDecode(a.body);
         _home = jsonDecode(h.body);
+        if (_carePetId == 0 && _pets.isNotEmpty) {
+          _carePetId = _pets.first['id'];
+          _carePetName = '${_pets.first['name']}';
+        }
         _loading = false;
         _error = null;
       });
@@ -150,7 +156,7 @@ class _HomePageState extends State<HomePage> {
                     leading: p['photo'] != null && '${p['photo']}'.isNotEmpty
                         ? CircleAvatar(radius: 28, backgroundImage: MemoryImage(base64Decode('${p['photo']}')))
                         : CircleAvatar(radius: 28, backgroundColor: const Color(0xFFFFB45E),
-                            child: Text((p['species'] == 'cat') ? '🐱' : '🐶', style: const TextStyle(fontSize: 24))),
+                            child: const Icon(Icons.pets, size: 24, color: Colors.black87)),
                     title: Text('${p['name']}',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                     subtitle: Text([
@@ -314,9 +320,9 @@ class _HomePageState extends State<HomePage> {
                                   : CircleAvatar(
                                       radius: 28,
                                       backgroundColor: const Color(0xFFFFB45E),
-                                      child: Text(
-                                        (p['species'] == 'cat') ? '🐱' : '🐶',
-                                        style: const TextStyle(fontSize: 24),
+                                      child: Icon(
+                                        (p['species'] == 'cat') ? Icons.pets : Icons.pets,
+                                        size: 24, color: Colors.black87,
                                       ),
                                     ),
                               title: Text('${p['name']}',
@@ -334,6 +340,109 @@ class _HomePageState extends State<HomePage> {
                                   MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
                             ),
                           ),
+                        const SizedBox(height: 10),
+                        // ── FEATURED REWARD (the void filler — a carousel) ──
+                        if ((_home['showcase'] ?? []).isNotEmpty)
+                          SizedBox(
+                            height: 110,
+                            child: ListView(
+                              scrollDirection: Axis.horizontal,
+                              children: [
+                                for (final s in (_home['showcase'] as List).take(5))
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 10),
+                                    child: SizedBox(
+                                      width: 180,
+                                      child: Card(
+                                        color: s['affordable'] == true
+                                            ? const Color(0x3322B573)
+                                            : const Color(0x22FFFFFF),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(10),
+                                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                            Row(children: [
+                                              const Icon(Icons.confirmation_number, size: 14),
+                                              const SizedBox(width: 4),
+                                              Expanded(child: Text('${s['title']}',
+                                                  maxLines: 2, overflow: TextOverflow.ellipsis,
+                                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))),
+                                            ]),
+                                            const Spacer(),
+                                            Text(s['affordable'] == true
+                                                ? 'READY TO CLAIM'
+                                                : '${s['needed'] ?? 0} pts to go',
+                                                style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: s['affordable'] == true
+                                                        ? Colors.greenAccent : Colors.grey)),
+                                            const SizedBox(height: 2),
+                                            ClipRRect(
+                                              borderRadius: BorderRadius.circular(3),
+                                              child: LinearProgressIndicator(
+                                                value: (s['progress'] ?? 0) / 100.0,
+                                                minHeight: 5,
+                                                backgroundColor: Colors.white10,
+                                                color: s['affordable'] == true
+                                                    ? Colors.greenAccent : const Color(0xFFFFB45E),
+                                              ),
+                                            ),
+                                          ]),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        const SizedBox(height: 10),
+                        // ── TODAY'S CARE CHECKLIST (the void filler) ──
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                              Text("Today's care for ${_carePetName}",
+                                  style: const TextStyle(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              if (_pets.length > 1)
+                                Wrap(spacing: 6, children: [
+                                  for (final p in _pets)
+                                    ChoiceChip(
+                                      label: Text('${p['name']}'),
+                                      selected: _carePetId == p['id'],
+                                      visualDensity: VisualDensity.compact,
+                                      onSelected: (_) => setState(() {
+                                        _carePetId = p['id'];
+                                        _carePetName = '${p['name']}';
+                                      }),
+                                    ),
+                                ]),
+                              const SizedBox(height: 6),
+                              Wrap(spacing: 8, children: [
+                                ActionChip(
+                                  avatar: const Icon(Icons.directions_walk, size: 16),
+                                  label: const Text('Walk'),
+                                  onPressed: () => _quickCheckIn('Walk'),
+                                ),
+                                ActionChip(
+                                  avatar: const Icon(Icons.restaurant, size: 16),
+                                  label: const Text('Fed'),
+                                  onPressed: () => _quickCheckIn('Fed'),
+                                ),
+                                ActionChip(
+                                  avatar: const Icon(Icons.sports_baseball, size: 16),
+                                  label: const Text('Played'),
+                                  onPressed: () => _quickCheckIn('Played'),
+                                ),
+                                ActionChip(
+                                  avatar: const Icon(Icons.brush, size: 16),
+                                  label: const Text('Brushed'),
+                                  onPressed: () => _quickCheckIn('Brushed'),
+                                ),
+                              ]),
+                            ]),
+                          ),
+                        ),
                         const SizedBox(height: 10),
                         // ── ACTION REQUIRED (care reminders) ──
                         if ((_home['actions'] ?? []).isNotEmpty)
@@ -361,31 +470,19 @@ class _HomePageState extends State<HomePage> {
                                           '${act['pet']}: ${act['vaccine'] ?? act['about'] ?? ''}'
                                           '${act['due'] != null ? ' (due ${act['due']})' : ''}',
                                           overflow: TextOverflow.ellipsis)),
+                                      if (act['type'] == 'vaccine_overdue')
+                                        IconButton(
+                                          icon: const Icon(Icons.check_circle, size: 18, color: Colors.greenAccent),
+                                          tooltip: 'Log shot',
+                                          onPressed: () => _logFromHome(act),
+                                        ),
+                                      if (act['pet_id'] != null)
+                                        IconButton(
+                                          icon: const Icon(Icons.close, size: 16),
+                                          tooltip: 'Dismiss',
+                                          onPressed: () => _dismissReminder(act),
+                                        ),
                                     ]),
-                                  ),
-                              ]),
-                            ),
-                          ),
-                        const SizedBox(height: 10),
-                        // ── REWARDS SHOWCASE (what 1612 pts can buy) ──
-                        if ((_home['showcase'] ?? []).isNotEmpty)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                Text('Rewards for your pack',
-                                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                                for (final s in (_home['showcase'] as List).take(4))
-                                  ListTile(
-                                    dense: true,
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: const Icon(Icons.confirmation_number),
-                                    title: Text('${s['title']}'),
-                                    trailing: Text('${s['points']} pts',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w600,
-                                            color: s['affordable'] == true
-                                                ? Colors.greenAccent : Colors.grey)),
                                   ),
                               ]),
                             ),
@@ -458,6 +555,38 @@ class _HomePageState extends State<HomePage> {
         .where((r) => seen.add('${r['pet']}-${r['store']}-${r['amount']}'))
         .toList();
     return rows.take(3).toList();
+  }
+
+  Future<void> _quickCheckIn(String what) async {
+    if (_pets.isEmpty) return;
+    final pid = _carePetId != 0 ? _carePetId : _pets.first['id'];
+    await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'));
+    _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$what logged! +25 pts · streak alive 🔥')));
+    }
+  }
+
+  Future<void> _logFromHome(Map<String, dynamic> act) async {
+    final pid = act['pet_id'];
+    await http.post(Uri.parse('$API/api/v1/pets/$pid/events'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'kind': 'vaccine', 'name': act['vaccine'] ?? 'Vaccine', 'date': ''}));
+    _load();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Logged! Calendar updated.')));
+    }
+  }
+
+  Future<void> _dismissReminder(Map<String, dynamic> act) async {
+    final pid = act['pet_id'];
+    final kind = act['type'] == 'vaccine_overdue' ? 'overdue' : 'first_vaccine';
+    await http.post(Uri.parse('$API/api/v1/pets/$pid/dismiss'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'kind': kind}));
+    _load();
   }
 
   void _showQuickAdd() {

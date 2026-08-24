@@ -115,6 +115,10 @@ def _db() -> sqlite3.Connection:
         check_date TEXT,
         action TEXT DEFAULT 'care'
     );
+    CREATE TABLE IF NOT EXISTS dismissed (
+        pet_id INTEGER NOT NULL, kind TEXT NOT NULL,
+        dismissed_at TEXT, PRIMARY KEY (pet_id, kind)
+    );
     """)
     return conn
 
@@ -710,15 +714,17 @@ def home_dashboard(user_id: int = 0):
     actions = []
     import datetime as _dt
     for p in pets:
+        dismissed = {r["kind"] for r in db.execute(
+            "SELECT kind FROM dismissed WHERE pet_id=?", (p["id"],)).fetchall()}
         ev = db.execute("SELECT name,date FROM health_events WHERE pet_id=?",
                         (p["id"],)).fetchall()
         cal = summarize([dict(r) for r in ev])
         for c in cal.get("calendar", []):
-            if c["overdue"]:
+            if c["overdue"] and "overdue" not in dismissed:
                 actions.append({"type": "vaccine_overdue", "pet": p["name"],
                                 "pet_id": p["id"], "vaccine": c["vaccine"],
                                 "due": c["next"], "days_left": c["days_left"]})
-        if not ev:
+        if not ev and "first_vaccine" not in dismissed:
             actions.append({"type": "first_vaccine", "pet": p["name"],
                             "pet_id": p["id"],
                             "about": "Start the health record - log the first vaccine"})
@@ -804,6 +810,20 @@ def _streak(db, pid: int) -> int:
 def pet_streak(pid: int):
     db = _db()
     return {"streak": _streak(db, pid)}
+
+
+@app.post("/api/v1/pets/{pid}/dismiss")
+def dismiss(pid: int, body: dict = None):
+    """Round 14 - the reviewer's Dismiss CTA: hide a reminder kind."""
+    body = body or {}
+    kind = str(body.get("kind", "overdue"))
+    db = _db()
+    import datetime as _dt
+    db.execute("INSERT OR REPLACE INTO dismissed (pet_id,kind,dismissed_at) "
+               "VALUES (?,?,?)",
+               (pid, kind, str(_dt.datetime.utcnow())))
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/v1/health")
