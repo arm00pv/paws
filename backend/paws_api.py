@@ -125,6 +125,14 @@ def _db() -> sqlite3.Connection:
         title TEXT, action TEXT DEFAULT 'redeemed',
         created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS meals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pet_id INTEGER NOT NULL,
+        food_upc TEXT DEFAULT '', brand TEXT, product TEXT,
+        amount REAL DEFAULT 0,  -- grams/cups (optional)
+        meal_time TEXT,
+        created_at TEXT
+    );
     """)
     return conn
 
@@ -944,6 +952,78 @@ def validate_coupon(code: str):
     return {"verdict": "VALID", "title": c["title"],
             "brand": c["brand"], "gs1": c["barcode"],
             "note": "present this to the cashier"}
+
+
+class MealIn(BaseModel):
+    pet_id: int
+    food_upc: str = ""
+    brand: str = ""
+    product: str = ""
+    amount: float = 0
+
+
+@app.post("/api/v1/meals")
+def log_meal(body: MealIn):
+    """ROUND 21 - THE FEEDING LOG: the daily habit + the data moat.
+    Every meal logged = a consumption data point brands cannot buy
+    ('share of stomach' - what's actually fed, when, whether it switched).
+    Capped at 4 meals/day/pet to prevent gaming."""
+    import datetime as _dt
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?", (body.pet_id,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    today = str(_dt.date.today())
+    n = db.execute("SELECT COUNT(*) AS c FROM meals WHERE pet_id=? "
+                   "AND date(meal_time)=?", (body.pet_id, today)).fetchone()["c"]
+    if n >= 4:
+        raise HTTPException(400, "meal cap reached for today (max 4)")
+    now = _dt.datetime.utcnow().isoformat()
+    cur = db.execute(
+        "INSERT INTO meals (pet_id,food_upc,brand,product,amount,meal_time,"
+        "created_at) VALUES (?,?,?,?,?,?,?)",
+        (body.pet_id, body.food_upc, body.brand, body.product, body.amount,
+         now, now))
+    db.commit()
+    _points(db, body.pet_id, 10, f"meal_{cur.lastrowid}")
+    return {"ok": True, "meal_id": cur.lastrowid, "points": 10}
+
+
+@app.get("/api/v1/meals/{pid}")
+def meals(pid: int, days: int = 7):
+    db = _db()
+    rows = db.execute("""
+        SELECT * FROM meals WHERE pet_id=?
+        ORDER BY id DESC LIMIT 50""", (pid,)).fetchall()
+    return {"meals": [dict(r) for r in rows]}
+
+
+@app.get("/api/v1/consumption")
+def consumption(user_id: int = 0, days: int = 14):
+    """ROUND 21 - THE SHARE-OF-STOMACH PANEL: the moat.
+    Consumption share by brand (meals logged), breed x brand x meals.
+    This is what a brand pays for that NO retailer transaction can show."""
+    db = _db()
+    rows = db.execute("""
+        SELECT m.brand AS brand, COUNT(*) AS meals,
+               pe.breed AS breed, ROUND(SUM(m.amount),1) AS total_amount
+        FROM meals m JOIN pets pe ON m.pet_id = pe.id
+        WHERE m.brand != '' AND (? = 0 OR pe.user_id = ?)
+        GROUP BY m.brand, pe.breed
+        ORDER BY meals DESC LIMIT 20""", (user_id, user_id)).fetchall()
+    total = sum(r["meals"] for r in rows) or 1
+    merged = {}
+    for r in rows:
+        b = r["brand"]
+        if b not in merged:
+            merged[b] = {"brand": b, "meals": 0, "share": 0.0}
+        merged[b]["meals"] += r["meals"]
+    out = [{"brand": v["brand"], "meals": v["meals"],
+            "share": round(100.0 * v["meals"] / total, 1)}
+           for v in merged.values()]
+    out.sort(key=lambda x: x["meals"], reverse=True)
+    return {"days": days, "total_meals": total,
+            "consumption_share": out,
+            "by_breed": [dict(r) for r in rows]}
 
 
 @app.get("/api/v1/health")

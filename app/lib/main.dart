@@ -1009,6 +1009,18 @@ class _PetPageState extends State<PetPage> {
         ]),
         const SizedBox(height: 8),
         Row(children: [
+          Expanded(child: FilledButton.tonalIcon(
+              onPressed: _logMeal,
+              icon: const Icon(Icons.restaurant),
+              label: const Text('🍖 Log a meal +10'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showMeals,
+              icon: const Icon(Icons.food_bank),
+              label: const Text('Meal history'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
           Expanded(child: OutlinedButton.icon(
               onPressed: _showHistory,
               icon: const Icon(Icons.receipt_long),
@@ -1159,6 +1171,59 @@ class _PetPageState extends State<PetPage> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Photo saved — what a cutie!')));
     }
+  }
+
+  Future<void> _logMeal() async {
+    final brand = TextEditingController();
+    final product = TextEditingController();
+    final amount = TextEditingController();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Log a meal'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Every meal builds the Share-of-Stomach panel — '
+            'what your pet actually eats.'),
+        const SizedBox(height: 8),
+        TextField(controller: brand, decoration: const InputDecoration(labelText: 'Brand', hintText: 'e.g. Royal Canin')),
+        TextField(controller: product, decoration: const InputDecoration(labelText: 'Product', hintText: 'e.g. GS Adult')),
+        TextField(controller: amount, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Amount (g)')),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () async {
+          Navigator.pop(ctx);
+          await http.post(Uri.parse('$API/api/v1/meals'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'pet_id': widget.petId, 'brand': brand.text,
+                              'product': product.text,
+                              'amount': double.tryParse(amount.text) ?? 0}));
+          _load();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Meal logged! +10 pts')));
+          }
+        }, child: const Text('Log meal')),
+      ],
+    ));
+  }
+
+  Future<void> _showMeals() async {
+    final r = await http.get(Uri.parse('$API/api/v1/meals/${widget.petId}'));
+    final d = jsonDecode(r.body);
+    final meals = (d['meals'] as List? ?? []);
+    if (!mounted) return;
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('Meal history (${meals.length})'),
+      content: SizedBox(width: 340, child: SingleChildScrollView(child: Column(
+          mainAxisSize: MainAxisSize.min, children: [
+        for (final m in meals.take(15))
+          ListTile(dense: true,
+            leading: const Icon(Icons.restaurant),
+            title: Text('${m['brand']} ${m['product']}'),
+            subtitle: Text('${m['meal_time'] ?? ''}'),
+            trailing: (m['amount'] ?? 0) > 0 ? Text('${m['amount']}g') : null),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
   }
 
   Future<void> _showHistory() async {
