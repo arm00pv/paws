@@ -336,6 +336,7 @@ class _HomePageState extends State<HomePage> {
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.push(context,
                         MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
+                    onLongPress: () => _showPetActions(p),
                   ),
                 ),
             ],
@@ -956,6 +957,57 @@ class _HomePageState extends State<HomePage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'kind': kind}));
     _load();
+  }
+
+  Future<void> _showPetActions(Map<String, dynamic> p) async {
+    final pid = p['id'];
+    if (!mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(leading: const Icon(Icons.edit), title: const Text('Edit name/breed'),
+            onTap: () => Navigator.pop(ctx, 'edit')),
+        ListTile(leading: const Icon(Icons.delete, color: Colors.redAccent),
+            title: const Text('Delete pet', style: TextStyle(color: Colors.redAccent)),
+            onTap: () => Navigator.pop(ctx, 'delete')),
+      ])),
+    );
+    if (action == 'delete') {
+      final sure = await showDialog<bool>(context: context, builder: (ctx) =>
+          AlertDialog(
+            title: Text('Delete ${p['name']}?'),
+            content: const Text('This removes the pet and all its records.'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Delete')),
+            ]));
+      if (sure == true) {
+        await http.delete(Uri.parse('$API/api/v1/pets/$pid'), headers: Account.headers());
+        _load();
+      }
+    } else if (action == 'edit') {
+      final name = TextEditingController(text: '${p['name']}');
+      final breed = TextEditingController(text: '${p['breed']}');
+      if (!mounted) return;
+      showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: const Text('Edit pet'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: name, decoration: const InputDecoration(labelText: 'Name')),
+          TextField(controller: breed, decoration: const InputDecoration(labelText: 'Breed')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(onPressed: () async {
+            Navigator.pop(ctx);
+            await http.put(Uri.parse('$API/api/v1/pets/$pid'),
+                headers: Account.headers(),
+                body: jsonEncode({'name': name.text, 'breed': breed.text}));
+            _load();
+          }, child: const Text('Save')),
+        ],
+      ));
+    }
   }
 
   void _showQuickAdd() {

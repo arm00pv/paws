@@ -1291,6 +1291,85 @@ def portion_calc(pid: int, food_type: str = "dry"):
                        food_type=food_type)
 
 
+# ── EDIT/DELETE (reviewer #5: data hygiene is trust) ────────────────
+
+@app.delete("/api/v1/pets/{pid}")
+def delete_pet(pid: int, x_token: str = Header(default="")):
+    """Delete a pet + its data (typo correction / departed pet)."""
+    uid = _require_user(x_token)
+    db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
+    for t in ("receipts", "purchases", "health_events", "weights",
+              "care_checks", "meals", "points_ledger"):
+        try:
+            db.execute(f"DELETE FROM {t} WHERE pet_id=?", (pid,))
+        except Exception:
+            pass
+    db.execute("DELETE FROM pets WHERE id=?", (pid,))
+    db.commit()
+    return {"ok": True}
+
+
+class PetEditIn(BaseModel):
+    name: str = ""
+    breed: str = ""
+    weight: float = 0
+
+
+@app.put("/api/v1/pets/{pid}")
+def edit_pet(pid: int, body: PetEditIn, x_token: str = Header(default="")):
+    """Edit a pet's core fields (fix typos)."""
+    uid = _require_user(x_token)
+    db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
+    sets = []
+    args = []
+    if body.name:
+        sets.append("name=?")
+        args.append(body.name)
+    if body.breed:
+        sets.append("breed=?")
+        args.append(body.breed)
+    if body.weight:
+        sets.append("weight=?")
+        args.append(body.weight)
+    if sets:
+        db.execute(f"UPDATE pets SET {', '.join(sets)} WHERE id=?",
+                   args + [pid])
+        db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/pets/{pid}/events/{eid}")
+def delete_event(pid: int, eid: int, x_token: str = Header(default="")):
+    """Delete a health event (a mistyped vaccine entry poisons the
+    calendar permanently — the reviewer's exact point)."""
+    uid = _require_user(x_token)
+    db = _db()
+    if not _owns_pet(db, pid, uid):
+        raise HTTPException(403, "you don't own this pet")
+    db.execute("DELETE FROM health_events WHERE id=? AND pet_id=?",
+               (eid, pid))
+    db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/v1/receipts/{rid}")
+def delete_receipt(rid: int, x_token: str = Header(default="")):
+    """Delete a receipt + its purchases (a wrong scan)."""
+    uid = _require_user(x_token)
+    db = _db()
+    r = db.execute("SELECT pet_id FROM receipts WHERE id=?", (rid,)).fetchone()
+    if not r or not _owns_pet(db, r["pet_id"], uid):
+        raise HTTPException(403, "not yours")
+    db.execute("DELETE FROM purchases WHERE receipt_id=?", (rid,))
+    db.execute("DELETE FROM receipts WHERE id=?", (rid,))
+    db.commit()
+    return {"ok": True}
+
+
 @app.get("/api/v1/health")
 def health():
     return {"ok": True, "app": "paws", "version": "0.1.0"}
