@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:open_file/open_file.dart';
 import 'package:image/image.dart' as img;
 import 'scan_screen.dart';
+import 'notifications.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
@@ -102,10 +103,54 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _load();
+    initNotifications();  // the reminder engine (round 22)
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkForUpdate());
   }
 
   /// THE AUTO-UPDATER: compare the GitHub latest release with our version.
+  /// ROUND 22 (reviewer #3): schedule care reminders from the calendar.
+  Future<void> _scheduleReminders() async {
+    try {
+      final now = DateTime.now();
+      var id = 100;
+      for (final p in _pets) {
+        // the pet detail has the calendars — fetch the summary
+        final r = await http.get(Uri.parse('$API/api/v1/pets/${p['id']}'));
+        final d = jsonDecode(r.body);
+        final vcal = (d['vaccine_calendar'] ?? {})['calendar'] as List? ?? [];
+        final meds = (d['med_schedule'] ?? {})['meds'] as List? ?? [];
+        final petName = p['name'];
+        for (final c in vcal) {
+          if (c['overdue'] == true) {
+            // remind tomorrow morning (best-effort; rescheduled each launch)
+            final when = DateTime(now.year, now.month, now.day, 9)
+                .add(const Duration(days: 1));
+            await scheduleReminder(
+              id: id++,
+              title: 'Vaccine overdue: $petName',
+              body: '${c['vaccine']} is OVERDUE — book the vet.',
+              when: when,
+            );
+          }
+        }
+        for (final m in meds) {
+          if (m['overdue'] == true) {
+            final when = DateTime(now.year, now.month, now.day, 9)
+                .add(const Duration(days: 1));
+            await scheduleReminder(
+              id: id++,
+              title: 'Medication overdue: $petName',
+              body: '${m['med']} dose is due — log it in PAWS.',
+              when: when,
+            );
+          }
+        }
+      }
+    } catch (_) {
+      // notifications are best-effort; the app still works without them
+    }
+  }
+
   Future<void> _checkForUpdate() async {
     try {
       final r = await http.get(Uri.parse(UPDATE_URL),
@@ -181,6 +226,7 @@ class _HomePageState extends State<HomePage> {
           _carePetName = '${_pets.first['name']}';
           _carePetIsCat = _pets.first['species'] == 'cat';
         }
+        _scheduleReminders();
         _loading = false;
         _error = null;
       });
