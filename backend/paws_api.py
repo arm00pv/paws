@@ -754,13 +754,28 @@ def home_dashboard(user_id: int = 0):
     # per-pet streak + care stats (fills the home with life)
     pet_stats = []
     for p in pets:
+        # upcoming vaccine (the vet summary the reviewer asked for)
+        nxt = db.execute("""
+            SELECT name, date FROM health_events WHERE pet_id=?
+            ORDER BY date DESC LIMIT 1""", (p["id"],)).fetchone()
+        ev = db.execute("SELECT name,date FROM health_events WHERE pet_id=?",
+                        (p["id"],)).fetchall()
+        cal = summarize([dict(r) for r in ev])
+        upcoming = None
+        for c in cal.get("calendar", []):
+            if not c["overdue"] and c["next"]:
+                if upcoming is None or c["days_left"] < upcoming["days_left"]:
+                    upcoming = {"vaccine": c["vaccine"], "next": c["next"],
+                                "days_left": c["days_left"]}
         pet_stats.append({
             "id": p["id"], "name": p["name"], "species": p["species"],
             "dob": p["dob"], "weight": p["weight"],
             "streak": _streak(db, p["id"]),
             "receipts": db.execute(
                 "SELECT COUNT(*) AS c FROM receipts WHERE pet_id=?",
-                (p["id"],)).fetchone()["c"]})
+                (p["id"],)).fetchone()["c"],
+            "vet": p["vet"], "insurance": p["insurance"],
+            "next_vaccine": upcoming})
     return {"actions": actions, "showcase": showcase, "points": pts,
             "pet_stats": pet_stats}
 

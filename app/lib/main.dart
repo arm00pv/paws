@@ -85,6 +85,7 @@ class _HomePageState extends State<HomePage> {
   int _tab = 0;
   int _carePetId = 0;
   String _carePetName = '';
+  bool _carePetIsCat = false;
 
   @override
   void initState() {
@@ -104,6 +105,7 @@ class _HomePageState extends State<HomePage> {
         if (_carePetId == 0 && _pets.isNotEmpty) {
           _carePetId = _pets.first['id'];
           _carePetName = '${_pets.first['name']}';
+          _carePetIsCat = _pets.first['species'] == 'cat';
         }
         _loading = false;
         _error = null;
@@ -319,7 +321,9 @@ class _HomePageState extends State<HomePage> {
                                     )
                                   : CircleAvatar(
                                       radius: 28,
-                                      backgroundColor: const Color(0xFFFFB45E),
+                                      backgroundColor: (p['species'] == 'cat')
+                                          ? const Color(0xFF4ECDC4)
+                                          : const Color(0xFFFFB45E),
                                       child: Icon(
                                         (p['species'] == 'cat') ? Icons.pets : Icons.pets,
                                         size: 24, color: Colors.black87,
@@ -414,19 +418,27 @@ class _HomePageState extends State<HomePage> {
                                       onSelected: (_) => setState(() {
                                         _carePetId = p['id'];
                                         _carePetName = '${p['name']}';
+                                        _carePetIsCat = p['species'] == 'cat';
                                       }),
                                     ),
                                 ]),
                               const SizedBox(height: 6),
                               Wrap(spacing: 8, children: [
-                                ActionChip(
-                                  avatar: const Icon(Icons.directions_walk, size: 16),
-                                  label: const Text('Walk'),
-                                  onPressed: () => _quickCheckIn('Walk'),
-                                ),
+                                if (_carePetIsCat)
+                                  ActionChip(
+                                    avatar: const Icon(Icons.cleaning_services, size: 16),
+                                    label: const Text('Litter'),
+                                    onPressed: () => _quickCheckIn('Litter scooped'),
+                                  )
+                                else
+                                  ActionChip(
+                                    avatar: const Icon(Icons.directions_walk, size: 16),
+                                    label: const Text('Walk'),
+                                    onPressed: () => _quickCheckIn('Walk'),
+                                  ),
                                 ActionChip(
                                   avatar: const Icon(Icons.restaurant, size: 16),
-                                  label: const Text('Fed'),
+                                  label: _carePetIsCat ? const Text('Wet food') : const Text('Fed'),
                                   onPressed: () => _quickCheckIn('Fed'),
                                 ),
                                 ActionChip(
@@ -443,6 +455,32 @@ class _HomePageState extends State<HomePage> {
                             ]),
                           ),
                         ),
+                        const SizedBox(height: 10),
+                        // ── VET SUMMARY (the reviewer's upcoming-vet ask) ──
+                        if ((_home['pet_stats'] ?? []).isNotEmpty)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('Health watch',
+                                    style: TextStyle(fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                for (final ps in (_home['pet_stats'] as List).take(3))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(children: [
+                                      const Icon(Icons.health_and_safety, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text(
+                                          ps['next_vaccine'] != null
+                                              ? '${ps['name']}: ${ps['next_vaccine']['vaccine']} ${_humanDue(ps['next_vaccine'])}'
+                                              : '${ps['name']}: health record in progress',
+                                          overflow: TextOverflow.ellipsis)),
+                                    ]),
+                                  ),
+                              ]),
+                            ),
+                          ),
                         const SizedBox(height: 10),
                         // ── ACTION REQUIRED (care reminders) ──
                         if ((_home['actions'] ?? []).isNotEmpty)
@@ -467,9 +505,14 @@ class _HomePageState extends State<HomePage> {
                                               ? Colors.redAccent : null),
                                       const SizedBox(width: 6),
                                       Expanded(child: Text(
-                                          '${act['pet']}: ${act['vaccine'] ?? act['about'] ?? ''}'
-                                          '${act['due'] != null ? ' (due ${act['due']})' : ''}',
-                                          overflow: TextOverflow.ellipsis)),
+                                          act['type'] == 'vaccine_overdue'
+                                              ? '${act['pet']}: ${act['vaccine']} OVERDUE'
+                                              : '${act['pet']}: ${act['about'] ?? ''}',
+                                          overflow: TextOverflow.ellipsis,
+                                          style: act['type'] == 'vaccine_overdue'
+                                              ? const TextStyle(fontWeight: FontWeight.bold,
+                                                  color: Colors.redAccent)
+                                              : null)),
                                       if (act['type'] == 'vaccine_overdue')
                                         IconButton(
                                           icon: const Icon(Icons.check_circle, size: 18, color: Colors.greenAccent),
@@ -547,6 +590,13 @@ class _HomePageState extends State<HomePage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
+  }
+
+  String _humanDue(Map<String, dynamic> v) {
+    final days = (v['days_left'] ?? 9999);
+    if (days < 30) return 'due in $days d';
+    if (days < 365) return 'due in ~${(days / 30).round()} mo';
+    return 'due ~${(days / 365).round()} yr';
   }
 
   List<dynamic> _activityRows() {
