@@ -1251,12 +1251,24 @@ class _PetPageState extends State<PetPage> {
           Expanded(child: FilledButton.tonalIcon(
               onPressed: _logMeal,
               icon: const Icon(Icons.restaurant),
-              label: const Text('🍖 Log a meal +10'))),
+              label: const Text('Log a meal +10'))),
           const SizedBox(width: 8),
           Expanded(child: OutlinedButton.icon(
               onPressed: _showMeals,
               icon: const Icon(Icons.food_bank),
-              label: const Text('Meal history'))),
+              label: const Text('Meals'))),
+        ]),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _scanVetInvoice,
+              icon: const Icon(Icons.health_and_safety),
+              label: const Text('Scan vet invoice'))),
+          const SizedBox(width: 8),
+          Expanded(child: OutlinedButton.icon(
+              onPressed: _showPassport,
+              icon: const Icon(Icons.badge),
+              label: const Text('Pet passport'))),
         ]),
         const SizedBox(height: 8),
         Row(children: [
@@ -1460,6 +1472,73 @@ class _PetPageState extends State<PetPage> {
             title: Text('${m['brand']} ${m['product']}'),
             subtitle: Text('${m['meal_time'] ?? ''}'),
             trailing: (m['amount'] ?? 0) > 0 ? Text('${m['amount']}g') : null),
+      ]))),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+    ));
+  }
+
+  Future<void> _scanVetInvoice() async {
+    final picker = ImagePicker();
+    final XFile? shot = await picker.pickImage(source: ImageSource.camera);
+    if (shot == null) return;
+    final bytes = await shot.readAsBytes();
+    final b64 = base64Encode(bytes);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Reading the vet invoice…')));
+    final r = await http.post(Uri.parse('$API/api/v1/vet-invoice'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'pet_id': widget.petId, 'image_b64': b64}));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    if (d['ok'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read that invoice — try a clearer photo')));
+      return;
+    }
+    _load();
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('${d['practice'] ?? 'Vet'} · ${d['date'] ?? ''}'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        for (final s in (d['services'] as List? ?? []))
+          ListTile(dense: true,
+            title: Text('${s['name']}'),
+            trailing: Text('\$${s['price']}')),
+        const SizedBox(height: 4),
+        Text('Logged to the health record! +${d['points'] ?? 0} pts',
+            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.greenAccent)),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
+    ));
+  }
+
+  Future<void> _showPassport() async {
+    final r = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/passport'));
+    final d = jsonDecode(r.body);
+    if (!mounted) return;
+    final p = d['pet'];
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: Text('${p['name']} · Pet Passport'),
+      content: SizedBox(width: 340, child: SingleChildScrollView(child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        Text('${p['breed']} · ${p['species']} · born ${p['dob']} · ${p['weight']}kg'),
+        if ((p['microchip'] ?? '').isNotEmpty)
+          Text('Microchip: ${p['microchip']}', style: const TextStyle(fontSize: 12)),
+        const Divider(),
+        const Text('Vaccines', style: TextStyle(fontWeight: FontWeight.bold)),
+        for (final v in (d['vaccines'] as List? ?? []))
+          Text('  • ${v['name']} — ${v['date'] ?? ''}', style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 6),
+        const Text('Visits & care', style: TextStyle(fontWeight: FontWeight.bold)),
+        for (final v in (d['visits'] as List? ?? []))
+          Text('  • ${v['name']} — ${v['date'] ?? ''}', style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 6),
+        const Text('Weight history', style: TextStyle(fontWeight: FontWeight.bold)),
+        for (final w in (d['weight_history'] as List? ?? []))
+          Text('  • ${w['date']}: ${w['weight']}kg', style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 8),
+        const Text('Show this to any vet, groomer or boarder.',
+            style: TextStyle(fontSize: 12, color: Colors.grey)),
       ]))),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
     ));

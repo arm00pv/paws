@@ -73,7 +73,8 @@ def _db() -> sqlite3.Connection:
     CREATE TABLE IF NOT EXISTS health_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pet_id INTEGER NOT NULL, kind TEXT NOT NULL,  -- vaccine|vet|med|test
-        name TEXT, date TEXT, notes TEXT
+        name TEXT, date TEXT, notes TEXT,
+        practice TEXT DEFAULT '', invoice_amount TEXT DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS receipts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1188,6 +1189,61 @@ def claim_mission(mid: int, body: dict = None):
     db.commit()
     _points(db, pet_id, m["points"], f"mission_{mid}")
     return {"ok": True, "points": m["points"], "title": m["title"]}
+
+
+class VetInvoiceIn(BaseModel):
+    pet_id: int
+    image_b64: str
+
+
+@app.post("/api/v1/vet-invoice")
+async def vet_invoice(body: VetInvoiceIn):
+    """ROUND 26 - VET INVOICE CAPTURE: scan a vet invoice, OCR extracts
+    practice/date/services, auto-logs the visit + procedures."""
+    from passport import _ask_vision, parse_invoice
+    text = _ask_vision(body.image_b64)
+    parsed = parse_invoice(text)
+    db = _db()
+    if not db.execute("SELECT 1 FROM pets WHERE id=?",
+                      (body.pet_id,)).fetchone():
+        raise HTTPException(404, "pet not found")
+    total = sum(s["price"] for s in parsed["services"])
+    if parsed["services"]:
+        db.execute(
+            "INSERT INTO health_events (pet_id,kind,name,date,notes,"
+            "practice,invoice_amount) VALUES (?,?,?,?,?,?,?)",
+            (body.pet_id, "vet", "Vet visit", parsed["date"],
+             "scanned invoice", parsed["practice"], str(total)))
+        for s in parsed["services"]:
+            db.execute(
+                "INSERT INTO health_events (pet_id,kind,name,date,practice,"
+                "invoice_amount) VALUES (?,?,?,?,?,?)",
+                (body.pet_id, "med", s["name"], parsed["date"],
+                 parsed["practice"], str(s["price"])))
+        db.commit()
+        _points(db, body.pet_id, 100, "vet_invoice")
+    return {"ok": bool(parsed["services"]), "practice": parsed["practice"],
+            "date": parsed["date"], "services": parsed["services"],
+            "points": 100 if parsed["services"] else 0}
+
+
+@app.get("/api/v1/pets/{pid}/passport")
+def pet_passport(pid: int):
+    """ROUND 26 - THE PET PASSPORT: one summary of the full health record
+    + weight, for vets, boarders, groomers, and travel."""
+    from passport import passport_payload
+    db = _db()
+    p = db.execute("SELECT * FROM pets WHERE id=?", (pid,)).fetchone()
+    if not p:
+        raise HTTPException(404, "pet not found")
+    events = db.execute(
+        "SELECT * FROM health_events WHERE pet_id=? ORDER BY date",
+        (pid,)).fetchall()
+    weights = db.execute(
+        "SELECT weight, date FROM weights WHERE pet_id=? ORDER BY date",
+        (pid,)).fetchall()
+    return passport_payload(dict(p), [dict(e) for e in events],
+                            [dict(w) for w in weights])
 
 
 @app.get("/api/v1/health")
