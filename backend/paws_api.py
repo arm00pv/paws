@@ -781,11 +781,13 @@ def home_dashboard(user_id: int = 0):
 
 
 @app.post("/api/v1/pets/{pid}/checkin")
-def pet_checkin(pid: int):
+def pet_checkin(pid: int, body: dict = None):
     """Round 11 - the daily care check-in: the streak hook.
-    A pet parent taps 'done today' (walk/brushed/played) - the streak
-    builds, driving daily returns (and daily data)."""
+    Round 16 - records WHAT was done (walk/fed/played/brushed/litter)
+    so the home has a real care log feed."""
     import datetime as _dt
+    body = body or {}
+    action = str(body.get("action", "care"))
     today = str(_dt.date.today())
     db = _db()
     if not db.execute("SELECT 1 FROM pets WHERE id=?", (pid,)).fetchone():
@@ -794,8 +796,8 @@ def pet_checkin(pid: int):
     if db.execute("SELECT 1 FROM care_checks WHERE pet_id=? AND check_date=?",
                   (pid, today)).fetchone():
         return {"ok": True, "streak": _streak(db, pid), "already": True}
-    db.execute("INSERT INTO care_checks (pet_id,check_date) VALUES (?,?)",
-               (pid, today))
+    db.execute("INSERT INTO care_checks (pet_id,check_date,action) VALUES (?,?,?)",
+               (pid, today, action))
     db.commit()
     _points(db, pid, 25, "daily_care")
     return {"ok": True, "streak": _streak(db, pid), "points": 25}
@@ -839,6 +841,19 @@ def dismiss(pid: int, body: dict = None):
                (pid, kind, str(_dt.datetime.utcnow())))
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/v1/care-log")
+def care_log(user_id: int = 0, limit: int = 10):
+    """Round 16 - the care log feed: what the pack did, when.
+    Fills the home void with REAL daily activity."""
+    db = _db()
+    rows = db.execute("""
+        SELECT c.check_date, c.action, p.name AS pet, p.species
+        FROM care_checks c JOIN pets p ON c.pet_id = p.id
+        WHERE (?=0 OR p.user_id=?)
+        ORDER BY c.id DESC LIMIT ?""", (user_id, user_id, limit)).fetchall()
+    return {"log": [dict(r) for r in rows]}
 
 
 @app.get("/api/v1/health")

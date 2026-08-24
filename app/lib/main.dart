@@ -80,6 +80,7 @@ class _HomePageState extends State<HomePage> {
   List<dynamic> _pets = [];
   Map<String, dynamic> _activity = {};
   Map<String, dynamic> _home = {};
+  List<dynamic> _careLog = [];
   bool _loading = true;
   String? _error;
   int _tab = 0;
@@ -98,10 +99,12 @@ class _HomePageState extends State<HomePage> {
       final r = await http.get(Uri.parse('$API/api/v1/pets'));
       final a = await http.get(Uri.parse('$API/api/v1/activity'));
       final h = await http.get(Uri.parse('$API/api/v1/home'));
+      final cl = await http.get(Uri.parse('$API/api/v1/care-log'));
       setState(() {
         _pets = jsonDecode(r.body)['pets'];
         _activity = jsonDecode(a.body);
         _home = jsonDecode(h.body);
+        _careLog = jsonDecode(cl.body)['log'] ?? [];
         if (_carePetId == 0 && _pets.isNotEmpty) {
           _carePetId = _pets.first['id'];
           _carePetName = '${_pets.first['name']}';
@@ -531,6 +534,37 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         const SizedBox(height: 10),
+                        // ── THE CARE LOG (real daily activity — the void filler) ──
+                        if (_careLog.isNotEmpty)
+                          Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                const Text('Care log',
+                                    style: TextStyle(fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 4),
+                                for (final c in _careLog.take(6))
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Row(children: [
+                                      Icon(c['action'] == 'Litter scooped'
+                                          ? Icons.cleaning_services
+                                          : c['action'] == 'Walk'
+                                              ? Icons.directions_walk
+                                              : Icons.favorite,
+                                          size: 16, color: const Color(0xFFFFB45E)),
+                                      const SizedBox(width: 6),
+                                      Expanded(child: Text(
+                                          '${c['pet']} · ${c['action']}',
+                                          overflow: TextOverflow.ellipsis)),
+                                      Text(_relativeDate('${c['check_date']}'),
+                                          style: Theme.of(context).textTheme.bodySmall),
+                                    ]),
+                                  ),
+                              ]),
+                            ),
+                          ),
+                        const SizedBox(height: 10),
                         if ((_activity['receipts'] ?? []).isNotEmpty)
                           Card(
                             child: Padding(
@@ -592,6 +626,22 @@ class _HomePageState extends State<HomePage> {
         content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
   }
 
+  String _relativeDate(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final day = DateTime(d.year, d.month, d.day);
+      final diff = today.difference(day).inDays;
+      if (diff == 0) return 'Today';
+      if (diff == 1) return 'Yesterday';
+      if (diff < 7) return '$diff d ago';
+      return iso;
+    } catch (_) {
+      return iso;
+    }
+  }
+
   String _humanDue(Map<String, dynamic> v) {
     final days = (v['days_left'] ?? 9999);
     if (days < 30) return 'due in $days d';
@@ -610,7 +660,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _quickCheckIn(String what) async {
     if (_pets.isEmpty) return;
     final pid = _carePetId != 0 ? _carePetId : _pets.first['id'];
-    await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'));
+    await http.post(Uri.parse('$API/api/v1/pets/$pid/checkin'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': what}));
     _load();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
