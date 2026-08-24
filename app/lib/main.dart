@@ -908,11 +908,12 @@ class _HomePageState extends State<HomePage> {
     final name = TextEditingController();
     final breed = TextEditingController();
     final dob = TextEditingController();
+    final weight = TextEditingController();
     String species = 'dog';
     showDialog(context: context, builder: (ctx) => AlertDialog(
       title: const Text('Add your pet'),
       content: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        TextField(controller: name, decoration: const InputDecoration(labelText: 'Name')),
+        TextField(controller: name, decoration: const InputDecoration(labelText: 'Name *')),
         TextField(controller: breed, decoration: const InputDecoration(labelText: 'Breed')),
         const SizedBox(height: 8),
         SegmentedButton<String>(
@@ -929,16 +930,27 @@ class _HomePageState extends State<HomePage> {
                 labelText: 'Birthday (YYYY-MM-DD)',
                 hintText: '2021-04-12',
                 helperText: "Tells us your pet's age - so reminders make sense")),
+        const SizedBox(height: 8),
+        TextField(controller: weight,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+                labelText: 'Weight (kg)', hintText: 'e.g. 28.5')),
       ])),
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
+          if (name.text.trim().isEmpty) return;
           await http.post(Uri.parse('$API/api/v1/pets'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'name': name.text, 'breed': breed.text,
-                              'species': species.toLowerCase(), 'dob': dob.text}));
+                              'species': species.toLowerCase(), 'dob': dob.text,
+                              'weight': double.tryParse(weight.text) ?? 0}));
           if (ctx.mounted) Navigator.pop(ctx);
           _load();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Welcome to the pack! +100 pts 🐾')));
+          }
         }, child: const Text('Save (+100 pts)')),
       ],
     ));
@@ -949,14 +961,70 @@ class _EmptyState extends StatelessWidget {
   final VoidCallback onAdd;
   const _EmptyState({required this.onAdd});
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.pets, size: 72, color: Colors.grey),
+  Widget build(BuildContext context) => ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const SizedBox(height: 20),
+          const Center(child: Icon(Icons.pets, size: 72, color: Color(0xFFFFB45E))),
           const SizedBox(height: 12),
-          const Text('Add your dog — earn points'),
+          const Center(child: Text('Welcome to PAWS',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold))),
+          const SizedBox(height: 6),
+          const Center(child: Text(
+              'The rewards app for pet parents — your scans become '
+              'real pet coupons.', textAlign: TextAlign.center)),
+          const SizedBox(height: 24),
+          // STEP 1
+          const _OnboardStep(
+              icon: Icons.pets, title: '1 · Add your pet',
+              body: 'Create a profile with photo, breed and birthday — '
+                  'so reminders make sense. (+100 pts)'),
           const SizedBox(height: 12),
-          ElevatedButton(onPressed: onAdd, child: const Text('Add your pet')),
-        ]),
+          // STEP 2
+          const _OnboardStep(
+              icon: Icons.document_scanner, title: '2 · Scan purchases',
+              body: 'Snap a receipt, scan a barcode, or paste an order '
+                  'email. We read it with AI — you earn points.'),
+          const SizedBox(height: 12),
+          // STEP 3
+          const _OnboardStep(
+              icon: Icons.confirmation_number, title: '3 · Claim real coupons',
+              body: 'Spend points on manufacturer-approved coupons '
+                  '(Royal Canin, Purina, Chewy…) with scannable barcodes.'),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.pets),
+            label: const Text('Add your pet — start earning'),
+            style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16)),
+          ),
+          const SizedBox(height: 8),
+          const Center(child: Text('Free · no card · your data stays yours',
+              style: TextStyle(fontSize: 12, color: Colors.grey))),
+        ],
+      );
+}
+
+class _OnboardStep extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+  const _OnboardStep({required this.icon, required this.title, required this.body});
+  @override
+  Widget build(BuildContext context) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(icon, size: 28, color: const Color(0xFFFFB45E)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 3),
+              Text(body, style: Theme.of(context).textTheme.bodySmall),
+            ])),
+          ]),
+        ),
       );
 }
 
