@@ -12,6 +12,7 @@ import 'package:open_file/open_file.dart';
 import 'package:image/image.dart' as img;
 import 'scan_screen.dart';
 import 'notifications.dart';
+import 'weight_chart.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
@@ -1084,6 +1085,7 @@ class _PetPageState extends State<PetPage> {
   int _points = 0;
   int _streak = 0;
   List<dynamic> _coupons = [];
+  List<dynamic> _weightCurve = [];
 
   @override
   void initState() {
@@ -1097,11 +1099,13 @@ class _PetPageState extends State<PetPage> {
     final p = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/points'));
     final c = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/coupons'));
     final s = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/streak'));
+    final w = await http.get(Uri.parse('$API/api/v1/pets/${widget.petId}/weight'));
     setState(() {
       _data = d;
       _points = jsonDecode(p.body)['balance'];
       _coupons = jsonDecode(c.body)['coupons'];
       _streak = jsonDecode(s.body)['streak'];
+      _weightCurve = jsonDecode(w.body)['curve'] ?? [];
     });
   }
 
@@ -1151,6 +1155,10 @@ class _PetPageState extends State<PetPage> {
                 onPressed: _checkIn,
                 child: const Text("Done today")),
           ),
+        ),
+        // ── THE WEIGHT CHART (the reviewer's point: data exists, show it) ──
+        Card(
+          child: WeightChart(curve: _weightCurve.map((w) => Map<String, dynamic>.from(w)).toList()),
         ),
         const SizedBox(height: 8),
         // ── THE VACCINE CALENDAR (the sticky feature) ────────────────
@@ -1313,7 +1321,9 @@ class _PetPageState extends State<PetPage> {
         ..._coupons.map((c) => ListTile(
               leading: const Icon(Icons.confirmation_number),
               title: Text('${c['title']}'),
-              subtitle: Text(c['code']),
+              subtitle: Text(
+                  '${c['code']}\n${_couponExpiry(c['created_at'], c['redeemed'])}'),
+              isThreeLine: true,
               trailing: IconButton(
                 icon: const Icon(Icons.qr_code),
                 onPressed: () => _showBarcode(c['code']),
@@ -1715,6 +1725,19 @@ class _PetPageState extends State<PetPage> {
       ])),
       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
     ));
+  }
+
+  String _couponExpiry(String created, int redeemed) {
+    if (redeemed == 1) return '✓ redeemed';
+    try {
+      final d = DateTime.parse(created);
+      final exp = d.add(const Duration(days: 90));
+      final days = exp.difference(DateTime.now()).inDays;
+      if (days < 0) return 'expired';
+      return 'expires in $days days';
+    } catch (_) {
+      return '';
+    }
   }
 
   void _showVaccinePicker() {
