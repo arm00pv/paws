@@ -133,6 +133,19 @@ def _db() -> sqlite3.Connection:
         meal_time TEXT,
         created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS missions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        brand TEXT NOT NULL, title TEXT NOT NULL,
+        action TEXT NOT NULL,  -- feed_X_days | walk_X_week | scan_X
+        target INTEGER NOT NULL, duration_days INTEGER DEFAULT 7,
+        points INTEGER NOT NULL, budget_cap INTEGER DEFAULT 1000,
+        active INTEGER DEFAULT 1, created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS mission_progress (
+        mission_id INTEGER NOT NULL, pet_id INTEGER NOT NULL,
+        count INTEGER DEFAULT 0, completed INTEGER DEFAULT 0,
+        PRIMARY KEY (mission_id, pet_id)
+    );
     """)
     return conn
 
@@ -1064,6 +1077,117 @@ def recalls_check(user_id: int = 0):
             "fed_brands": sorted(brands),
             "matches": matched[:10],
             "checked_at": feed.get("fetched_at")}
+
+
+def _seed_missions(db):
+    """Demo brand-funded missions (the pilot mechanism). A real brand
+    fills these; the engine is what's sold."""
+    n = db.execute("SELECT COUNT(*) AS c FROM missions").fetchone()["c"]
+    if n == 0:
+        import datetime as _dt
+        now = str(_dt.datetime.utcnow())
+        db.executemany(
+            "INSERT INTO missions (brand,title,action,target,duration_days,"
+            "points,created_at) VALUES (?,?,?,?,?,?,?)", [
+            ("Royal Canin", "Feed Royal Canin for 7 days",
+             "feed", 7, 7, 200, now),
+            ("Greenies", "Log 5 meals this week",
+             "meal", 5, 7, 100, now),
+            ("Purina", "Try a Purina meal this week",
+             "feed_brand", 1, 7, 50, now),
+        ])
+        db.commit()
+
+
+@app.get("/api/v1/missions")
+def missions(user_id: int = 0):
+    """ROUND 25 (reviewer #2) - BRAND-FUNDED MISSIONS: the pilot engine.
+    'Feed Hill's for 7 days -> 200 pts'. The brand funds the points;
+    we track completion via the feeding log + care check-ins."""
+    db = _db()
+    _seed_missions(db)
+    pets = db.execute("SELECT * FROM pets WHERE (?=0 OR user_id=?) ORDER BY id",
+                      (user_id, user_id)).fetchall()
+    ms = db.execute("SELECT * FROM missions WHERE active=1").fetchall()
+    out = []
+    for m in ms:
+        # progress per pet (summed across the household)
+        total = 0
+        for p in pets:
+            prog = db.execute(
+                "SELECT count, completed FROM mission_progress "
+                "WHERE mission_id=? AND pet_id=?",
+                (m["id"], p["id"])).fetchone()
+            if prog:
+                total += prog["count"]
+        # what counts toward the mission (filtered to THIS user's pets)
+        import datetime as _dt
+        if m["action"] in ("feed", "meal"):
+            since = str(_dt.date.today() - _dt.timedelta(days=m["duration_days"]))
+            total = 0
+            for p in pets:
+                if m["action"] == "feed":
+                    c = db.execute(
+                        "SELECT COUNT(*) AS c FROM meals "
+                        "WHERE pet_id=? AND brand LIKE ? AND meal_time >= ?",
+                        (p["id"], f"%{m['brand']}%", since)).fetchone()["c"]
+                else:
+                    c = db.execute(
+                        "SELECT COUNT(*) AS c FROM meals "
+                        "WHERE pet_id=? AND meal_time >= ?",
+                        (p["id"], since)).fetchone()["c"]
+                total += c
+        out.append({"id": m["id"], "brand": m["brand"], "title": m["title"],
+                    "points": m["points"], "target": m["target"],
+                    "progress": min(total, m["target"]),
+                    "done": total >= m["target"]})
+    return {"missions": out}
+
+
+@app.post("/api/v1/missions/{mid}/claim")
+def claim_mission(mid: int, body: dict = None):
+    """Claim the mission points (once). The brand funds these."""
+    body = body or {}
+    pet_id = int(body.get("pet_id", 0))
+    db = _db()
+    m = db.execute("SELECT * FROM missions WHERE id=? AND active=1",
+                   (mid,)).fetchone()
+    if not m:
+        raise HTTPException(404, "mission not found")
+    # verify completion for this pet
+    if not pet_id:
+        raise HTTPException(400, "pet_id required")
+    prog = db.execute(
+        "SELECT count, completed FROM mission_progress "
+        "WHERE mission_id=? AND pet_id=?", (mid, pet_id)).fetchone()
+    if prog and prog["completed"]:
+        raise HTTPException(400, "already claimed")
+    # the mission is a HOUSEHOLD challenge - check the pack total
+    # (matches the display; the points credit to this pet)
+    import datetime as _dt
+    since = str(_dt.date.today() - _dt.timedelta(days=m["duration_days"]))
+    uid = db.execute("SELECT user_id FROM pets WHERE id=?",
+                     (pet_id,)).fetchone()
+    uid = uid["user_id"] if uid else 1
+    pids = [r["id"] for r in db.execute(
+        "SELECT id FROM pets WHERE user_id=?", (uid,)).fetchall()]
+    c = 0
+    for pid in pids:
+        if m["action"] == "feed":
+            c += db.execute("SELECT COUNT(*) AS c FROM meals WHERE pet_id=? "
+                            "AND brand LIKE ? AND meal_time >= ?",
+                            (pid, f"%{m['brand']}%", since)).fetchone()["c"]
+        else:
+            c += db.execute("SELECT COUNT(*) AS c FROM meals WHERE pet_id=? "
+                            "AND meal_time >= ?", (pid, since)).fetchone()["c"]
+    if c < m["target"]:
+        raise HTTPException(400, f"mission not complete yet ({c}/{m['target']})")
+    db.execute("INSERT OR REPLACE INTO mission_progress "
+               "(mission_id,pet_id,count,completed) VALUES (?,?,?,1)",
+               (mid, pet_id, c))
+    db.commit()
+    _points(db, pet_id, m["points"], f"mission_{mid}")
+    return {"ok": True, "points": m["points"], "title": m["title"]}
 
 
 @app.get("/api/v1/health")

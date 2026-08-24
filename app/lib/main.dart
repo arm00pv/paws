@@ -92,6 +92,7 @@ class _HomePageState extends State<HomePage> {
   Map<String, dynamic> _activity = {};
   Map<String, dynamic> _home = {};
   List<dynamic> _careLog = [];
+  List<dynamic> _missions = [];
   String? _recallAlert;
   int _recallChecked = 0;
   bool _loading = true;
@@ -241,11 +242,13 @@ class _HomePageState extends State<HomePage> {
       final a = await http.get(Uri.parse('$API/api/v1/activity'));
       final h = await http.get(Uri.parse('$API/api/v1/home'));
       final cl = await http.get(Uri.parse('$API/api/v1/care-log'));
+      final ms = await http.get(Uri.parse('$API/api/v1/missions'));
       setState(() {
         _pets = jsonDecode(r.body)['pets'];
         _activity = jsonDecode(a.body);
         _home = jsonDecode(h.body);
         _careLog = jsonDecode(cl.body)['log'] ?? [];
+        _missions = jsonDecode(ms.body)['missions'] ?? [];
         if (_carePetId == 0 && _pets.isNotEmpty) {
           _carePetId = _pets.first['id'];
           _carePetName = '${_pets.first['name']}';
@@ -327,6 +330,47 @@ class _HomePageState extends State<HomePage> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        // ── BRAND-FUNDED MISSIONS (reviewer #2 — the pilot engine) ──
+        if (_missions.isNotEmpty) ...[
+          Text('Missions',
+              style: Theme.of(context).textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text('Brand-funded challenges — complete them for bonus points',
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 8),
+          for (final m in _missions)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    Expanded(child: Text('${m['title']}',
+                        style: const TextStyle(fontWeight: FontWeight.w600))),
+                    Text('+${m['points']} pts',
+                        style: const TextStyle(fontWeight: FontWeight.bold,
+                            color: const Color(0xFFFFB45E))),
+                  ]),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: m['target'] > 0 ? (m['progress'] ?? 0) / m['target'] : 0,
+                      minHeight: 8,
+                      backgroundColor: Colors.white10,
+                      color: m['done'] == true ? Colors.greenAccent : const Color(0xFFFFB45E),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(m['done'] == true
+                      ? 'Complete! Claim your points'
+                      : '${m['progress'] ?? 0}/${m['target']} · feed ${m['brand']} to progress',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ]),
+              ),
+            ),
+          const SizedBox(height: 12),
+        ],
         Text('Rewards',
             style: Theme.of(context).textTheme.titleLarge
                 ?.copyWith(fontWeight: FontWeight.bold)),
