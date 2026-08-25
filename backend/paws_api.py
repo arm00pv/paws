@@ -82,6 +82,15 @@ def _db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # SEC-7: versioned migration — CREATE TABLE IF NOT EXISTS won't add
+    # columns to existing installs (care_checks.created_at was a no-op)
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(care_checks)")]
+        if "created_at" not in cols:
+            conn.execute("ALTER TABLE care_checks ADD COLUMN created_at TEXT DEFAULT ''")
+            conn.commit()
+    except Exception:
+        pass
     conn.executescript("""
     CREATE TABLE IF NOT EXISTS pets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -414,18 +423,27 @@ async def ocr_receipt(body: OcrIn):
         _sys.path.insert(0, "/home/zixen15/are")
         from vision_world import ask_vision
         import tempfile
+        # SEC-8: cap the image size (was unbounded memory + a predictable
+        # /tmp path a symlink could hijack)
+        if len(body.image_b64) > 4_000_000:
+            return {"text": "", "error": "image too large (max ~3MB)"}
         img = _b64.b64decode(body.image_b64)
-        tmp = os.path.join(tempfile.gettempdir(), f"paws_{int(time.time())}.png")
-        with open(tmp, "wb") as f:
-            f.write(img)
-        text = ask_vision(
-            tmp,
-            "You are a receipt reader. Extract from this pet-supply receipt: "
-            "store name, date, and every line item with brand/product and "
-            "price. Return STRICT JSON: "
-            '{"store": "...", "date": "...", "items": [{"brand": "...", '
-            '"product": "...", "amount": 12.34}]}. Only the JSON, nothing else.')
-        os.remove(tmp)
+        fd, tmp = tempfile.mkstemp(prefix="paws_", suffix=".png")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(img)
+            text = ask_vision(
+                tmp,
+                "You are a receipt reader. Extract from this pet-supply receipt: "
+                "store name, date, and every line item with brand/product and "
+                "price. Return STRICT JSON: "
+                '{"store": "...", "date": "...", "items": [{"brand": "...", '
+                '"product": "...", "amount": 12.34}]}. Only the JSON, nothing else.')
+        finally:
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
         return {"text": text}
     except Exception as e:
         return {"text": "", "error": str(e)[:100]}

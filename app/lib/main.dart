@@ -118,10 +118,13 @@ class _HomePageState extends State<HomePage> {
 
   void _showAccountGate() {
     showDialog(context: context, barrierDismissible: false, builder: (ctx) =>
-        AccountScreen(onDone: () {
-          Navigator.pop(ctx);
-          _load();
-        }));
+        PopScope(
+          canPop: false,  // SEC: the back button can't bypass the gate
+          child: AccountScreen(onDone: () {
+            Navigator.pop(ctx);
+            _load();
+          }),
+        ));
   }
 
   /// THE AUTO-UPDATER: compare the GitHub latest release with our version.
@@ -189,6 +192,16 @@ class _HomePageState extends State<HomePage> {
             const SnackBar(content: Text('Recall check unavailable right now')));
       }
     }
+  }
+
+  Future<void> _logout() async {
+    await Account.clear();
+    _pets = [];
+    _home = {};
+    _activity = {};
+    _careLog = [];
+    _missions = [];
+    _showAccountGate();
   }
 
   Future<void> _checkForUpdate() async {
@@ -286,7 +299,15 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('PAWS — rewards for good boys & girls'),
-          actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: _load)]),
+          actions: [
+            IconButton(icon: const Icon(Icons.refresh), onPressed: _load),
+            if (Account.loggedIn)
+              IconButton(
+                icon: const Icon(Icons.logout),
+                tooltip: 'Log out',
+                onPressed: _logout,
+              ),
+          ]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
@@ -382,9 +403,17 @@ class _HomePageState extends State<HomePage> {
                   ),
                   const SizedBox(height: 4),
                   Text(m['done'] == true
-                      ? 'Complete! Claim your points'
+                      ? 'Complete!'
                       : '${m['progress'] ?? 0}/${m['target']} · feed ${m['brand']} to progress',
                       style: Theme.of(context).textTheme.bodySmall),
+                  if (m['done'] == true)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.tonal(
+                        onPressed: () => _claimMission(m),
+                        child: Text('Claim +${m['points']} pts'),
+                      ),
+                    ),
                 ]),
               ),
             ),
@@ -842,6 +871,24 @@ class _HomePageState extends State<HomePage> {
                     );
   }
 
+  Future<void> _claimMission(Map<String, dynamic> m) async {
+    if (_pets.isEmpty) return;
+    final pid = _pets.first['id'];
+    final r = await http.post(Uri.parse('$API/api/v1/missions/${m['id']}/claim'),
+        headers: Account.headers(),
+        body: jsonEncode({'pet_id': pid}));
+    final d = jsonDecode(r.body);
+    _load();
+    if (!mounted) return;
+    if (r.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Claimed +${d['points'] ?? 0} pts!')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${d['detail'] ?? 'claim failed'}')));
+    }
+  }
+
   Future<void> _showPanel() async {
     final r = await http.get(Uri.parse('$API/api/v1/panel'));
     final d = jsonDecode(r.body);
@@ -876,12 +923,18 @@ class _HomePageState extends State<HomePage> {
 
   String _careTime(String created, String fallbackDate) {
     // ROUND 32 (agy's co-parenting idea): 'Fed at 7:45' not just 'Today'
+    // SEC-4 (audit): the backend stores UTC without a marker — parse as
+    // UTC so the local time is correct in any timezone
     if (created.isNotEmpty) {
       try {
-        final dt = DateTime.parse(created).toLocal();
+        final raw = created.endsWith('Z') ? created : created + 'Z';
+        final dt = DateTime.parse(raw).toLocal();
         final h = dt.hour.toString().padLeft(2, '0');
         final m = dt.minute.toString().padLeft(2, '0');
-        return '${_relativeDate(created.substring(0, 10))} · $h:$m';
+        final d = '${dt.year.toString().padLeft(4, '0')}-'
+            '${dt.month.toString().padLeft(2, '0')}-'
+            '${dt.day.toString().padLeft(2, '0')}';
+        return '${_relativeDate(d)} · $h:$m';
       } catch (_) {}
     }
     return _relativeDate(fallbackDate);
