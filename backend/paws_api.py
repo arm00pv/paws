@@ -759,8 +759,15 @@ def signup(body: SignupIn):
     token_hash = _h.sha256(token.encode()).hexdigest()  # store the hash, not the token
     cur = db.execute("INSERT INTO users (email,name,token_hash) VALUES (?,?,?)",
                      (email, body.name or email.split("@")[0], token_hash))
+    uid = cur.lastrowid
+    # CRITICAL-1c (audit): pre-auth pets sat under user_id=1 with no user
+    # rows — a new signup couldn't write to them. The FIRST user claims
+    # the legacy pets so existing data stays writable.
+    n_users = db.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+    if n_users == 1:
+        db.execute("UPDATE pets SET user_id=? WHERE user_id=1", (uid,))
     db.commit()
-    return {"user_id": cur.lastrowid, "token": token,
+    return {"user_id": uid, "token": token,
             "message": "welcome to PAWS"}
 
 

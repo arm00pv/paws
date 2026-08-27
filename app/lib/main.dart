@@ -594,6 +594,7 @@ class _HomePageState extends State<HomePage> {
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () => Navigator.push(context,
                                   MaterialPageRoute(builder: (_) => PetPage(petId: p['id']))),
+                              onLongPress: () => _showPetActions(p),
                             ),
                           ),
                         const SizedBox(height: 10),
@@ -914,11 +915,24 @@ class _HomePageState extends State<HomePage> {
   Future<void> _showRefer() async {
     if (_pets.isEmpty) return;
     final pid = _pets.first['id'];
-    final r = await http.post(Uri.parse('$API/api/v1/pets/$pid/refer'));
+    // SEC-4 (audit): the referral POST was missing the token — 401 for
+    // every logged-in user, and the toast showed 'code null — +null pts'
+    final r = await http.post(Uri.parse('$API/api/v1/pets/$pid/refer'),
+        headers: Account.headers());
     final d = jsonDecode(r.body);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Referral code ${d['code']} — +${d['points']} pts when a friend joins')));
+    if (r.statusCode != 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${d['detail'] ?? 'referral failed'}')));
+      return;
+    }
+    if (d['already'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Your invite code is ${d['code']} — you already earned the bonus')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Invite code ${d['code']} — +${d['points']} pts when a friend joins')));
+    }
   }
 
   String _careTime(String created, String fallbackDate) {
@@ -1611,15 +1625,20 @@ class _PetPageState extends State<PetPage> {
         TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
         ElevatedButton(onPressed: () async {
           Navigator.pop(ctx);
-          await http.post(Uri.parse('$API/api/v1/meals'),
-            headers: {'Content-Type': 'application/json'},
+          final mr = await http.post(Uri.parse('$API/api/v1/meals'),
+            headers: Account.headers(),
             body: jsonEncode({'pet_id': widget.petId, 'brand': brand.text,
                               'product': product.text,
                               'amount': double.tryParse(amount.text) ?? 0}));
+          final md = jsonDecode(mr.body);
           _load();
-          if (mounted) {
+          if (!mounted) return;
+          if (mr.statusCode == 200) {
             ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Meal logged! +10 pts')));
+                SnackBar(content: Text('Meal logged! +${md['points'] ?? 10} pts')));
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('${md['detail'] ?? 'meal failed'}')));
           }
         }, child: const Text('Log meal')),
       ],
