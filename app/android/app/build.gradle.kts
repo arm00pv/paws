@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.paws_app"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 37  // flutter_secure_storage requires API 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

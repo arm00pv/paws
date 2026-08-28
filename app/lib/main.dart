@@ -2044,7 +2044,30 @@ class _PetPageState extends State<PetPage> {
           },
         ),
       ])),
-      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done'))],
+      actions: [
+        // THE REDEEM ACTION (reviewer #8): 'Used it' marks the coupon
+        // redeemed — the shop validation then returns ALREADY_REDEEMED
+        if (coupon['redeemed'] != 1)
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final r = await http.post(
+                  Uri.parse('$API/api/v1/coupons/$code/redeem'),
+                  headers: Account.headers());
+              _load();
+              if (mounted) {
+                final d = jsonDecode(r.body);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(r.statusCode == 200
+                        ? 'Marked as used — the coupon is now single-use'
+                        : '${d['detail'] ?? 'redeem failed'}'),
+                ));
+              }
+            },
+            child: const Text('Used it at the shop'),
+          ),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Done')),
+      ],
     ));
   }
 }

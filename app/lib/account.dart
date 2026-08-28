@@ -4,7 +4,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 const API = String.fromEnvironment(
     'PAWS_API', defaultValue: 'http://127.0.0.1:8235');
@@ -14,33 +14,34 @@ class Account {
   static int userId = 0;
   static String email = '';
 
+  // SEC-5 hardening: the token lives in the OS keychain (flutter_secure_storage),
+  // not plaintext shared_preferences — the app is public now
+  static const _s = FlutterSecureStorage();
+
   static bool get loggedIn => token.isNotEmpty;
 
   static Future<void> load() async {
-    final p = await SharedPreferences.getInstance();
-    token = p.getString('paws_token') ?? '';
-    userId = p.getInt('paws_user_id') ?? 0;
-    email = p.getString('paws_email') ?? '';
+    token = await _s.read(key: 'paws_token') ?? '';
+    userId = int.tryParse(await _s.read(key: 'paws_user_id') ?? '') ?? 0;
+    email = await _s.read(key: 'paws_email') ?? '';
   }
 
   static Future<void> save(String t, int uid, String e) async {
     token = t;
     userId = uid;
     email = e;
-    final p = await SharedPreferences.getInstance();
-    await p.setString('paws_token', t);
-    await p.setInt('paws_user_id', uid);
-    await p.setString('paws_email', e);
+    await _s.write(key: 'paws_token', value: t);
+    await _s.write(key: 'paws_user_id', value: '$uid');
+    await _s.write(key: 'paws_email', value: e);
   }
 
   static Future<void> clear() async {
     token = '';
     userId = 0;
     email = '';
-    final p = await SharedPreferences.getInstance();
-    await p.remove('paws_token');
-    await p.remove('paws_user_id');
-    await p.remove('paws_email');
+    await _s.delete(key: 'paws_token');
+    await _s.delete(key: 'paws_user_id');
+    await _s.delete(key: 'paws_email');
   }
 
   /// The auth header for write requests.
