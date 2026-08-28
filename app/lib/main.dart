@@ -108,10 +108,21 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _boot() async {
     await Account.load();          // load the stored token (round 29)
-    initNotifications();
+    // AUDIT FIX: await + guard initNotifications (an init throw was an
+    // unhandled async error that could crash the launch)
+    try {
+      await initNotifications();
+    } catch (_) {
+      // notifications are best-effort — the app works without them
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkForUpdate();
-      if (!Account.loggedIn) _showAccountGate();
+      // AUDIT FIX: show the gate FIRST, then check for updates (the
+      // update dialog used to stack on top of the gate)
+      if (!Account.loggedIn) {
+        _showAccountGate();
+      } else {
+        _checkForUpdate();
+      }
     });
     _load();
   }
@@ -1808,12 +1819,18 @@ class _PetPageState extends State<PetPage> {
         ElevatedButton(onPressed: () async {
           final w = double.tryParse(ctrl.text);
           if (w == null) return;
-          await http.post(
+          // AUDIT FIX: auth header + error feedback (was silent failure)
+          final wr = await http.post(
               Uri.parse('$API/api/v1/pets/${widget.petId}/weight'),
-              headers: {'Content-Type': 'application/json'},
+              headers: Account.headers(),
               body: jsonEncode({'weight': w}));
           if (ctx.mounted) Navigator.pop(ctx);
           _load();
+          if (mounted && wr.statusCode != 200) {
+            final wd = jsonDecode(wr.body);
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('${wd['detail'] ?? 'could not log the weight'}')));
+          }
         }, child: const Text('Log +50 pts')),
       ],
     ));
@@ -1957,11 +1974,18 @@ class _PetPageState extends State<PetPage> {
       ),
     );
     if (confirmed != true) return;
-    await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/events'),
+    // AUDIT FIX: surface failures (was silent — a 403 or bad date failed
+    // with no feedback)
+    final er = await http.post(Uri.parse('$API/api/v1/pets/${widget.petId}/events'),
         headers: Account.headers(),
         body: jsonEncode({'kind': kind, 'name': name ?? (kind == 'vaccine' ? 'Vaccine' : 'Vet visit'),
                           'date': dateCtrl.text.trim()}));
     _load();
+    if (mounted && er.statusCode != 200) {
+      final ed = jsonDecode(er.body);
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${ed['detail'] ?? 'could not log the event'}')));
+    }
   }
 
   Future<void> _showCatalog() async {
